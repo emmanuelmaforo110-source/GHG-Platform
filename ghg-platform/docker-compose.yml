@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ghg_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ghg_admin
+      POSTGRES_PASSWORD: ghg_dev_password
+      POSTGRES_DB: ghg_platform
+    ports:
+      - "15432:5432"
+    volumes:
+      - ghg_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ghg_admin -d ghg_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ghg_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: ghg_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ghg_minio_admin
+      MINIO_ROOT_PASSWORD: ghg_minio_dev_password
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console (http://localhost:9001)
+    volumes:
+      - ghg_minio_data:/data
+
+volumes:
+  ghg_postgres_data:
+    name: ghg-platform_ghg_postgres_data_v2
+  ghg_minio_data:

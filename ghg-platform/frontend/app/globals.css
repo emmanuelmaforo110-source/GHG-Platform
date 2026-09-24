@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #18241e;
+  --muted: #66736b;
+  --canvas: #f4f7f3;
+  --line: #d9e2db;
+  --brand: #1f5c3f;
+}
+
+@layer base {
+  body {
+    @apply bg-[var(--canvas)] text-[var(--ink)];
+    font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+  }
+  ::selection {
+    @apply bg-brand-light text-brand;
+  }
+  input[type='text'],
+  input[type='number'],
+  input[type='email'],
+  input[type='password'],
+  select,
+  textarea {
+    @apply w-full rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm shadow-sm transition focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500;
+  }
+  label {
+    @apply mb-1 block text-sm font-medium text-gray-700;
+  }
+  button {
+    @apply rounded-md px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-brand/30 focus:ring-offset-2;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-brand text-white hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply border border-gray-300 bg-white text-gray-700 hover:bg-gray-50;
+  }
+  .card {
+    @apply rounded-lg border border-[var(--line)] bg-white p-5 shadow-[0_8px_24px_rgba(31,92,63,0.05)];
+  }
+}

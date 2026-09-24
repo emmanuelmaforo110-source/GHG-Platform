@@ -1,0 +1,306 @@
+// Prisma schema — runnable translation of the SQL DDL in GHG_Platform_Architecture.md
+// Run `npx prisma migrate dev --name init` after setting DATABASE_URL to generate the real DB.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum UserRole {
+  admin
+  data_entry
+  management
+}
+
+enum GhgScope {
+  scope_1
+  scope_2
+  scope_3
+}
+
+enum Scope1Subcategory {
+  stationary_combustion
+  mobile_combustion
+  fugitive_emissions
+}
+
+enum Scope2Method {
+  location_based
+  market_based
+}
+
+enum BoundaryApproach {
+  operational_control
+  financial_control
+  equity_share
+}
+
+enum ReportingStatus {
+  draft
+  submitted
+  approved
+  locked
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+  submit
+  approve
+  export
+  login
+}
+
+// ---------- Tenancy & Access ----------
+
+model Organization {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String
+  country         String?
+  defaultCurrency String?  @map("default_currency")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+
+  facilities       Facility[]
+  users            User[]
+  reportingPeriods ReportingPeriod[]
+  emissionFactors  EmissionFactor[]
+  activityData     ActivityData[]
+  relevanceScreens Scope3RelevanceScreen[]
+  auditLogs        AuditLog[]
+
+  @@map("organizations")
+}
+
+model Facility {
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  name           String
+  address        String?
+  country        String?
+  isActive       Boolean @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  activityData ActivityData[]
+  restrictedUsers User[]      @relation("RestrictedFacility")
+
+  @@map("facilities")
+}
+
+model User {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId         String    @map("organization_id") @db.Uuid
+  email                  String
+  passwordHash           String    @map("password_hash")
+  fullName               String    @map("full_name")
+  role                   UserRole  @default(data_entry)
+  restrictedFacilityId   String?   @map("restricted_facility_id") @db.Uuid
+  isActive               Boolean   @default(true) @map("is_active")
+  lastLoginAt            DateTime? @map("last_login_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  restrictedFacility   Facility?   @relation("RestrictedFacility", fields: [restrictedFacilityId], references: [id])
+
+  enteredActivityData  ActivityData[] @relation("EnteredBy")
+  updatedActivityData  ActivityData[] @relation("UpdatedBy")
+  createdEmissionFactors EmissionFactor[]
+  uploadedAttachments  Attachment[]
+  auditLogs            AuditLog[]
+  submittedPeriods     ReportingPeriod[] @relation("SubmittedBy")
+  approvedPeriods      ReportingPeriod[] @relation("ApprovedBy")
+  assessedScreens      Scope3RelevanceScreen[]
+
+  @@unique([organizationId, email])
+  @@map("users")
+}
+
+// ---------- Reference Data ----------
+
+model GhgCategory {
+  id                Int      @id @default(autoincrement())
+  scope             GhgScope
+  scope3CategoryNo  Int?     @map("scope3_category_no")
+  name              String
+  scope1Subcategory Scope1Subcategory? @map("scope1_subcategory")
+  description       String?
+
+  emissionFactors  EmissionFactor[]
+  activityData     ActivityData[]
+  relevanceScreens Scope3RelevanceScreen[]
+
+  @@unique([scope, scope3CategoryNo])
+  @@map("ghg_categories")
+}
+
+model EmissionFactor {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid // null = global/system default
+  categoryId     Int      @map("category_id")
+  factorName     String   @map("factor_name")
+  value          Decimal  @db.Decimal(14, 6)
+  unit           String
+  validYear      Int      @map("valid_year")
+  source         String
+  notes          String?
+  isDefault      Boolean  @default(true) @map("is_default")
+  isReviewed     Boolean  @default(false) @map("is_reviewed")
+  createdBy      String?  @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     GhgCategory   @relation(fields: [categoryId], references: [id])
+  createdByUser User?        @relation(fields: [createdBy], references: [id])
+  activityData ActivityData[]
+
+  @@unique([organizationId, categoryId, factorName, validYear])
+  @@index([categoryId, validYear])
+  @@map("emission_factors")
+}
+
+// ---------- Reporting Periods, Activity Data & Evidence ----------
+
+model ReportingPeriod {
+  id                          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId              String            @map("organization_id") @db.Uuid
+  year                        Int
+  boundaryApproach            BoundaryApproach  @default(operational_control) @map("boundary_approach")
+  isBaseYear                  Boolean           @default(false) @map("is_base_year")
+  recalculationThresholdPct   Decimal           @default(5.00) @map("recalculation_threshold_pct") @db.Decimal(5, 2)
+  staffFte                    Decimal?          @map("staff_fte") @db.Decimal(6, 1)
+  status                      ReportingStatus   @default(draft)
+  submittedBy                 String?           @map("submitted_by") @db.Uuid
+  submittedAt                 DateTime?         @map("submitted_at")
+  approvedBy                  String?           @map("approved_by") @db.Uuid
+  approvedAt                  DateTime?         @map("approved_at")
+  createdAt                   DateTime          @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  submitter    User?        @relation("SubmittedBy", fields: [submittedBy], references: [id])
+  approver     User?        @relation("ApprovedBy", fields: [approvedBy], references: [id])
+
+  activityData     ActivityData[]
+  relevanceScreens Scope3RelevanceScreen[]
+
+  @@unique([organizationId, year])
+  @@map("reporting_periods")
+}
+
+model ActivityData {
+  id                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId            String   @map("organization_id") @db.Uuid
+  facilityId                String   @map("facility_id") @db.Uuid
+  reportingPeriodId         String   @map("reporting_period_id") @db.Uuid
+  categoryId                Int      @map("category_id")
+  scope2Method               Scope2Method? @map("scope2_method")
+
+  sourceName                 String   @map("source_name")
+  detail                     String?
+  fuelOrMaterialType         String?  @map("fuel_or_material_type")
+
+  quantity                   Decimal  @db.Decimal(16, 4)
+  unit                       String
+
+  emissionFactorId           String?  @map("emission_factor_id") @db.Uuid
+  emissionFactorValueUsed    Decimal  @map("emission_factor_value_used") @db.Decimal(14, 6)
+  emissionFactorUnitUsed     String   @map("emission_factor_unit_used")
+  emissionFactorSourceUsed   String   @map("emission_factor_source_used")
+
+  sourceActivityDataId       String?  @map("source_activity_data_id") @db.Uuid
+  derivationNote              String? @map("derivation_note")
+
+  emissionsKgco2e             Decimal @map("emissions_kgco2e") @db.Decimal(16, 4)
+  emissionsTco2e               Decimal @map("emissions_tco2e") @db.Decimal(16, 6) // computed in service layer on save
+
+  notes                         String?
+  status                         ReportingStatus @default(draft)
+
+  enteredBy                       String   @map("entered_by") @db.Uuid
+  enteredAt                        DateTime @default(now()) @map("entered_at")
+  updatedBy                         String?  @map("updated_by") @db.Uuid
+  updatedAt                          DateTime @default(now()) @updatedAt @map("updated_at")
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  facility         Facility         @relation(fields: [facilityId], references: [id])
+  reportingPeriod  ReportingPeriod  @relation(fields: [reportingPeriodId], references: [id], onDelete: Cascade)
+  category         GhgCategory      @relation(fields: [categoryId], references: [id])
+  emissionFactor   EmissionFactor?  @relation(fields: [emissionFactorId], references: [id])
+  enteredByUser    User             @relation("EnteredBy", fields: [enteredBy], references: [id])
+  updatedByUser    User?            @relation("UpdatedBy", fields: [updatedBy], references: [id])
+
+  // self-reference for derived Scope 3 rows (WTT / T&D loss -> source Scope 1/2 row)
+  sourceActivityData ActivityData?  @relation("Derivation", fields: [sourceActivityDataId], references: [id])
+  derivedRows        ActivityData[] @relation("Derivation")
+
+  attachments Attachment[]
+
+  @@index([reportingPeriodId])
+  @@index([categoryId])
+  @@index([facilityId])
+  @@map("activity_data")
+}
+
+model Scope3RelevanceScreen {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId      String   @map("organization_id") @db.Uuid
+  reportingPeriodId   String   @map("reporting_period_id") @db.Uuid
+  categoryId          Int      @map("category_id")
+  isIncluded          Boolean  @default(false) @map("is_included")
+  relevanceAssessment String   @map("relevance_assessment")
+  assessedBy          String?  @map("assessed_by") @db.Uuid
+  assessedAt          DateTime @default(now()) @map("assessed_at")
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  reportingPeriod ReportingPeriod @relation(fields: [reportingPeriodId], references: [id], onDelete: Cascade)
+  category        GhgCategory     @relation(fields: [categoryId], references: [id])
+  assessor        User?           @relation(fields: [assessedBy], references: [id])
+
+  @@unique([reportingPeriodId, categoryId])
+  @@map("scope3_relevance_screen")
+}
+
+model Attachment {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  activityDataId String   @map("activity_data_id") @db.Uuid
+  fileName       String   @map("file_name")
+  fileUrl        String   @map("file_url")
+  fileType       String?  @map("file_type")
+  fileSizeBytes  BigInt?  @map("file_size_bytes")
+  uploadedBy     String   @map("uploaded_by") @db.Uuid
+  uploadedAt     DateTime @default(now()) @map("uploaded_at")
+
+  activityData ActivityData @relation(fields: [activityDataId], references: [id], onDelete: Cascade)
+  uploader     User         @relation(fields: [uploadedBy], references: [id])
+
+  @@map("attachments")
+}
+
+// ---------- Governance ----------
+
+model AuditLog {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  userId         String?     @map("user_id") @db.Uuid
+  action         AuditAction
+  entityType     String      @map("entity_type")
+  entityId       String?     @map("entity_id") @db.Uuid
+  oldValue       Json?       @map("old_value")
+  newValue       Json?       @map("new_value")
+  ipAddress      String?     @map("ip_address")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
