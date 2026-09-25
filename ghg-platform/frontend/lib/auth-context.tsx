@@ -15,10 +15,10 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-// The backend doesn't expose a "who am I" endpoint yet (flagged in the architecture doc's open
-// items); as a pragmatic MVP stand-in, decode the JWT payload client-side to restore the session
-// on page refresh. This is fine because it's the same payload the backend already trusts and
-// verifies server-side on every request — the frontend copy is read-only, never a trust boundary.
+// Decodes the JWT payload client-side so the UI can show the user instantly on page refresh.
+// The session is then confirmed with GET /auth/me, which returns the user's current record from the
+// database (so role changes and deactivations take effect without re-login). The decoded copy is
+// read-only display data, never a trust boundary — the backend verifies the token on every request.
 function decodeJwt(token: string): AuthUser | null {
   try {
     const payload = JSON.parse(atob(token.split('.')[1]));
@@ -28,6 +28,7 @@ function decodeJwt(token: string): AuthUser | null {
       role: payload.role,
       email: payload.email,
       fullName: payload.fullName ?? payload.email,
+      restrictedFacilityId: payload.restrictedFacilityId ?? null,
     };
   } catch {
     return null;
@@ -41,8 +42,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const token = getToken();
-    if (token) setUser(decodeJwt(token));
-    setLoading(false);
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setUser(decodeJwt(token));
+    // Confirm the session with the server; a 401 clears the token and redirects to /login (see api.ts).
+    api
+      .get<AuthUser>('/auth/me')
+      .then((fresh) => setUser(fresh))
+      .catch((err) => {
+        // Only an auth failure ends the session; a network hiccup keeps the decoded user.
+        if (err?.status === 401) setUser(null);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   async function login(email: string, password: string) {

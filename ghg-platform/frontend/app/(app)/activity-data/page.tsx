@@ -28,6 +28,8 @@ export default function ActivityDataPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [form, setForm] = useState<Partial<CreateActivityDataInput>>({});
+  // When set, the form edits this existing entry instead of creating a new one.
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -94,11 +96,12 @@ export default function ActivityDataPage() {
 
     setSubmitting(true);
     try {
-      const created = await api.post<ActivityDataRow>('/activity-data', {
-        ...form,
-        quantity: Number(form.quantity),
-      });
+      const payload = { ...form, quantity: Number(form.quantity) };
+      const created = editingId
+        ? await api.patch<ActivityDataRow>(`/activity-data/${editingId}`, payload)
+        : await api.post<ActivityDataRow>('/activity-data', payload);
       setLastResult(created);
+      setEditingId(null);
 
       if (pendingFile) {
         const fd = new FormData();
@@ -113,6 +116,45 @@ export default function ActivityDataPage() {
       setError(err instanceof ApiError ? err.message : 'Failed to save the entry.');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function startEdit(row: ActivityDataRow) {
+    setError(null);
+    setLastResult(null);
+    setFieldErrors({});
+    setEditingId(row.id);
+    setForm({
+      facilityId: row.facilityId,
+      reportingPeriodId: row.reportingPeriodId,
+      categoryId: row.categoryId,
+      sourceName: row.sourceName,
+      detail: row.detail ?? undefined,
+      fuelOrMaterialType: row.fuelOrMaterialType ?? undefined,
+      quantity: Number(row.quantity),
+      unit: row.unit,
+      emissionFactorId: row.emissionFactorId ?? undefined,
+      scope2Method: row.scope2Method ?? undefined,
+      notes: row.notes ?? undefined,
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setFieldErrors({});
+    setForm((f) => ({ facilityId: f.facilityId, reportingPeriodId: f.reportingPeriodId }));
+  }
+
+  async function handleDelete(row: ActivityDataRow) {
+    if (!window.confirm(`Delete "${row.sourceName}"? Any automatic entries calculated from it will also be removed.`)) return;
+    setError(null);
+    try {
+      await api.delete(`/activity-data/${row.id}`);
+      if (editingId === row.id) cancelEdit();
+      await loadRows(row.reportingPeriodId);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete the entry.');
     }
   }
 
@@ -139,6 +181,11 @@ export default function ActivityDataPage() {
         {selectedPeriod && !periodIsEditable && (
           <div className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
             This period is <strong className="capitalize">{selectedPeriod.status}</strong>. Activity data is read-only after submission.
+          </div>
+        )}
+        {editingId && (
+          <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
+            You are editing an existing entry. The old values are kept in the audit log.
           </div>
         )}
         {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -288,6 +335,9 @@ export default function ActivityDataPage() {
           <div className="rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-700">
             Estimated emissions: <strong>{estimatedKgCo2e.toLocaleString(undefined, { maximumFractionDigits: 4 })} kgCO2e</strong>
             {' '}({(estimatedKgCo2e / 1000).toLocaleString(undefined, { maximumFractionDigits: 4 })} tCO2e)
+            <span className="block text-xs text-gray-500">
+              Estimate assumes the quantity is in the factor&apos;s unit. When saved, other units (e.g. MWh, gallons) are converted automatically.
+            </span>
           </div>
         )}
 
@@ -314,8 +364,13 @@ export default function ActivityDataPage() {
         </div>
 
         <div className="flex justify-end gap-2 pt-2">
+          {editingId && (
+            <button type="button" className="btn-secondary" onClick={cancelEdit} disabled={submitting}>
+              Cancel edit
+            </button>
+          )}
           <button type="submit" className="btn-primary" disabled={submitting || !periodIsEditable}>
-            {submitting ? 'Saving…' : 'Submit entry'}
+            {submitting ? 'Saving…' : editingId ? 'Save changes' : 'Submit entry'}
           </button>
         </div>
       </form>
@@ -335,6 +390,7 @@ export default function ActivityDataPage() {
                 <th className="py-2 font-normal">Category</th>
                 <th className="py-2 font-normal">Quantity</th>
                 <th className="py-2 text-right font-normal">tCO2e</th>
+                <th className="py-2 text-right font-normal"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -344,6 +400,22 @@ export default function ActivityDataPage() {
                   <td className="py-2 text-gray-500">{r.category.name}</td>
                   <td className="py-2 text-gray-500">{Number(r.quantity).toLocaleString()} {r.unit}</td>
                   <td className="py-2 text-right">{Number(r.emissionsTco2e).toFixed(4)}</td>
+                  <td className="py-2 text-right whitespace-nowrap">
+                    {r.sourceActivityDataId ? (
+                      <span className="text-xs text-gray-400" title="Calculated automatically from a Scope 1 or Scope 2 entry">
+                        Automatic
+                      </span>
+                    ) : periodIsEditable ? (
+                      <>
+                        <button type="button" className="text-xs text-blue-700 hover:underline" onClick={() => startEdit(r)}>
+                          Edit
+                        </button>
+                        <button type="button" className="ml-3 text-xs text-red-700 hover:underline" onClick={() => handleDelete(r)}>
+                          Delete
+                        </button>
+                      </>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>

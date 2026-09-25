@@ -12,6 +12,38 @@ budget time for the inevitable small fixes (a typo, a version mismatch) on first
 
 ---
 
+## Phase 0 (stabilise) — what changed
+
+These changes are on the Git branch `phase-0-stabilise`, for review before merging into `main`.
+
+| Area | Change |
+| --- | --- |
+| Deleting entries | Deleting a Scope 1/2 entry now also deletes its automatic WTT / T&D entry (previously it stayed and kept counting). Entries in submitted, approved or locked periods can no longer be deleted. Automatic entries can't be deleted or edited directly. |
+| Editing entries | New `PATCH /api/activity-data/:id` and **Edit** / **Delete** buttons on the Activity data page. Emissions and automatic entries are recalculated; the audit log stores old and new values. |
+| Units | Quantities are converted to the emission factor's unit before calculating (e.g. MWh → kWh, US/imperial gallons → litres, tonnes → kg, miles → km, GJ → kWh). Units that don't fit the factor (e.g. litres for electricity) are rejected with a clear message instead of giving a wrong number. See `backend/src/activity-data/units.ts`. |
+| Emission factor matching | Exact name match first; if several factors could apply, the API asks the user to choose instead of guessing. The prior-year fallback no longer looks at other organisations' private factors. A factor chosen by id must be a global default or the user's own organisation's. The grid-loss (T&D) row now uses the exact grid factor of its Scope 2 entry. |
+| Automatic rows in the database | New migration `20260925130000_phase0_derived_rows`: removes orphaned/duplicate automatic rows, deletes automatic rows together with their source (`ON DELETE CASCADE`), and allows only one automatic row per source + category. |
+| Sessions | New `GET /api/auth/me` returns the signed-in user's current record; the web app now confirms the session with it on page load, so role changes and deactivations apply without re-login. |
+| Tests | 32 unit tests, including an in-memory run of the reference workbook (Scope 1 = 9.61 t, Scope 2 = 6.12 t, WTT diesel 0.62 t, WTT petrol 1.77 t, T&D 1.0404 t, commuting 7.5072 t). Run with `npm test` in `backend/`. |
+| CI | `.github/workflows/ci.yml` (repository root): on every push, builds and tests the backend, applies all migrations to a fresh PostgreSQL and seeds it, and builds the frontend. |
+| Build / deploy | `backend/tsconfig.build.json` fixes `npm run start:prod` (the build previously went to `dist/src/`). New `Dockerfile`s for backend and frontend; `docker compose --profile app up -d --build` now runs the whole system (database, API on :4000, web app on :3000). |
+| Setup fix | `backend/.env.example` now points at port 15432, matching `docker-compose.yml`. |
+
+### Trying Phase 0 on your computer
+
+1. Start Docker Desktop, then in a terminal in the `ghg-platform` folder run `docker compose up -d`.
+2. In `ghg-platform/backend`: `npm install`, then `npx prisma migrate deploy` (applies the new migration), then `npx prisma generate`, then `npm test` — you should see all tests pass.
+3. Start the API with `npm run start:dev`, and in `ghg-platform/frontend` start the web app with `npm run dev`.
+4. Open http://localhost:3000, sign in, go to **Activity data**, and try:
+   - Enter 18 **MWh** of electricity — the result should be 6,120 kg CO2e (the same as 18,000 kWh).
+   - Enter 100 **litres** against the electricity factor — you should get a clear error.
+   - Click **Edit** on a diesel entry and change the quantity — the "WTT — Diesel" automatic row updates too.
+   - Click **Delete** on that diesel entry — its automatic row disappears as well.
+
+Note: the Dockerfiles and CI workflow were written without being able to run Docker or GitHub Actions in the environment where they were prepared; the first CI run on GitHub is their real test.
+
+---
+
 ## 1. Prerequisites
 
 - Node.js 20+ and npm
@@ -212,10 +244,7 @@ flawless `npm run dev` on the very first try.
 
 ## 5. What's next (not yet built)
 
-1. **No "who am I" endpoint** — the frontend currently decodes its own JWT to restore a session on
-   refresh (see the comment in `lib/auth-context.tsx`). This is safe (the backend independently
-   verifies the token on every request) but a proper `GET /auth/me` endpoint returning the fresh
-   user record would be cleaner and let the UI reflect role/deactivation changes without re-login.
+1. ~~**No "who am I" endpoint**~~ — done in Phase 0 (`GET /auth/me`).
 2. **No dedicated categories endpoint** — the activity-data form currently derives the category
    list from `/emission-factors` (see the comment in that page). Small addition:
    `GET /ghg-categories` on the backend, matching the `facilities`/`reporting-periods` pattern.
@@ -244,5 +273,5 @@ flawless `npm run dev` on the very first try.
 5. **Multi-organization-per-email login** — flagged directly in `auth.service.ts`: the current
    login looks up a user by email only, which breaks if the same person belongs to multiple
    tenants. Fine for the pilot (Phase 6), needs revisiting before wider rollout.
-6. **CI + deployment** — no pipeline yet. Once this runs locally, wiring GitHub Actions
-   (lint + test on PR) and a Render/Railway deploy is a half-day task.
+6. **CI + deployment** — CI and Dockerfiles added in Phase 0; a hosted staging server (e.g. Render/Railway)
+   is still to be set up.

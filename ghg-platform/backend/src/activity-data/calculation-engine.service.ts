@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
+import { EmissionFactor, Prisma } from '@prisma/client';
+import { toFactorUnit } from './units';
 
 /**
  * Implements Section 3 of GHG_Platform_Architecture.md:
@@ -8,9 +9,12 @@ import { Prisma } from '@prisma/client';
  *  3.3 — derived Scope 3 rows (WTT reuses Scope 1 fuel qty; T&D loss reuses Scope 2 kWh qty)
  *  3.4 — recalculation-threshold check against the org's base year
  *
- * Kept as a separate injectable (rather than static functions) so it can be unit-tested against the
- * reference workbook's known totals (Scope 1 = 9.61 tCO2e, Scope 2 = 6.12 tCO2e, Scope 3 = 12.38 tCO2e)
- * as described in the architecture doc's Phase 4 — see calculation-engine.service.spec.ts.
+ * Phase 0 hardening (see GHG Platform Roadmap):
+ *  - Factor matching is exact-first and refuses to guess when several factors could apply.
+ *  - Prior-year fallback only looks at the caller's own organization and global defaults
+ *    (it previously could pick up another tenant's private override).
+ *  - Quantities are converted to the factor's unit before multiplying (see units.ts).
+ *  - Derived rows are updated/created without the dummy-UUID upsert, and stale ones are removed.
  */
 @Injectable()
 export class CalculationEngineService {
@@ -22,6 +26,51 @@ export class CalculationEngineService {
   }
 
   /**
+   * Converts the activity quantity to the factor's unit, then applies the factor.
+   * Throws BadRequestException if the units are incompatible.
+   */
+  computeWithUnits(
+    quantity: Prisma.Decimal | number,
+    activityUnit: string,
+    factor: Pick<EmissionFactor, 'value' | 'unit'>,
+  ): { convertedQuantity: number; emissionsKg: number } {
+    const convertedQuantity = toFactorUnit(Number(quantity), activityUnit, factor.unit);
+    return { convertedQuantity, emissionsKg: this.computeEmissionsKg(convertedQuantity, factor.value) };
+  }
+
+  /**
+   * Picks exactly one factor from a candidate list:
+   *  1. exact factor-name match (case-insensitive) with the hint,
+   *  2. otherwise the single candidate whose name contains the hint,
+   *  3. with no hint, the category's only factor.
+   * Returns null when nothing matches; throws when the choice is ambiguous.
+   */
+  pickFactor<T extends { factorName: string }>(candidates: T[], hint?: string | null): T | null {
+    if (candidates.length === 0) return null;
+    const h = hint?.trim().toLowerCase();
+
+    if (h) {
+      const exact = candidates.filter((c) => c.factorName.trim().toLowerCase() === h);
+      if (exact.length === 1) return exact[0];
+      const partial = candidates.filter((c) => c.factorName.toLowerCase().includes(h));
+      if (partial.length === 1) return partial[0];
+      if (partial.length > 1) {
+        throw new BadRequestException(
+          `"${hint}" matches more than one emission factor (${partial.map((c) => c.factorName).join('; ')}). ` +
+            'Choose the exact emission factor instead.',
+        );
+      }
+      return null;
+    }
+
+    if (candidates.length === 1) return candidates[0];
+    throw new BadRequestException(
+      `This category has several emission factors (${candidates.map((c) => c.factorName).join('; ')}). ` +
+        'Enter the fuel or material type, or choose the exact emission factor.',
+    );
+  }
+
+  /**
    * Resolves the applicable emission_factors row for a given category + fuel/material type + year,
    * preferring an organization-specific override over the global default, and falling back to the
    * most recent prior year (flagged) if nothing exists for the exact year. Section 3.2, step 1.
@@ -29,37 +78,42 @@ export class CalculationEngineService {
   async resolveFactor(params: {
     organizationId: string;
     categoryId: number;
-    factorNameHint?: string; // e.g. fuelOrMaterialType, used to narrow multi-factor categories
+    factorNameHint?: string | null; // e.g. fuelOrMaterialType, used to narrow multi-factor categories
     year: number;
-  }) {
+  }): Promise<EmissionFactor & { isPriorYearFallback?: boolean }> {
     const { organizationId, categoryId, factorNameHint, year } = params;
 
-    const nameFilter = factorNameHint
-      ? { factorName: { contains: factorNameHint, mode: Prisma.QueryMode.insensitive } }
-      : {};
-
     // 1. Org-specific override for the exact year
-    let factor = await this.prisma.emissionFactor.findFirst({
-      where: { organizationId, categoryId, validYear: year, ...nameFilter },
+    const orgExact = await this.prisma.emissionFactor.findMany({
+      where: { organizationId, categoryId, validYear: year },
     });
+    let factor = this.pickFactor(orgExact, factorNameHint);
 
     // 2. Global default for the exact year
     if (!factor) {
-      factor = await this.prisma.emissionFactor.findFirst({
-        where: { organizationId: null, categoryId, validYear: year, ...nameFilter },
+      const globalExact = await this.prisma.emissionFactor.findMany({
+        where: { organizationId: null, categoryId, validYear: year },
       });
+      factor = this.pickFactor(globalExact, factorNameHint);
     }
 
-    // 3. Fall back to the most recent prior year (org override, then global), and flag for review
+    // 3. Most recent prior year — own org first, then global; never another organization's factors.
     if (!factor) {
-      factor = await this.prisma.emissionFactor.findFirst({
-        where: { categoryId, validYear: { lt: year }, ...nameFilter },
+      const prior = await this.prisma.emissionFactor.findMany({
+        where: { categoryId, validYear: { lt: year }, OR: [{ organizationId }, { organizationId: null }] },
         orderBy: { validYear: 'desc' },
       });
-      if (factor) {
-        console.warn(
-          `No factor found for category ${categoryId} in ${year}; using ${factor.validYear} value as fallback — flag for Admin review.`,
-        );
+      const years = [...new Set(prior.map((f) => f.validYear))];
+      for (const y of years) {
+        const sameYear = prior.filter((f) => f.validYear === y);
+        const own = this.pickFactor(sameYear.filter((f) => f.organizationId === organizationId), factorNameHint);
+        const picked = own ?? this.pickFactor(sameYear.filter((f) => f.organizationId === null), factorNameHint);
+        if (picked) {
+          console.warn(
+            `No factor found for category ${categoryId} in ${year}; using ${picked.validYear} value as fallback — flag for Admin review.`,
+          );
+          return { ...picked, isPriorYearFallback: true };
+        }
       }
     }
 
@@ -74,7 +128,9 @@ export class CalculationEngineService {
   /**
    * Section 3.3 — after a Scope 1 fuel row or Scope 2 electricity row is saved, create/update the
    * derived Scope 3 Category 3 (Fuel- and Energy-Related Activities) rows that reuse its quantity.
-   * Idempotent: if a derived row already exists for this source, it is updated rather than duplicated.
+   * Idempotent: if a derived row already exists for this source, it is updated rather than duplicated;
+   * if the source no longer qualifies (e.g. fuel changed to one without a WTT factor), the stale
+   * derived row is deleted so it stops counting in totals.
    */
   async syncDerivedRows(sourceRow: {
     id: string;
@@ -83,8 +139,9 @@ export class CalculationEngineService {
     reportingPeriodId: string;
     categoryId: number;
     fuelOrMaterialType: string | null;
-    quantity: Prisma.Decimal;
+    quantity: Prisma.Decimal | number;
     unit: string;
+    emissionFactorId?: string | null;
     enteredBy: string;
   }) {
     const sourceCategory = await this.prisma.ghgCategory.findUnique({ where: { id: sourceRow.categoryId } });
@@ -96,38 +153,31 @@ export class CalculationEngineService {
     if (!scope3FuelEnergyCategory) return; // reference data not seeded — nothing to derive against
 
     const period = await this.prisma.reportingPeriod.findUniqueOrThrow({ where: { id: sourceRow.reportingPeriodId } });
+    const existingId = await this.findDerivedRow(sourceRow.id, scope3FuelEnergyCategory.id);
+
+    let derived: Omit<Prisma.ActivityDataUncheckedCreateInput, 'enteredBy'> | null = null;
 
     // --- Case A: Scope 1 fuel combustion row -> WTT derived row ---
     if (sourceCategory.scope === 'scope_1' && sourceRow.fuelOrMaterialType) {
-      const wttFactorHint = `WTT — ${sourceRow.fuelOrMaterialType.toLowerCase()}`;
       const wttFactor = await this.resolveFactor({
         organizationId: sourceRow.organizationId,
         categoryId: scope3FuelEnergyCategory.id,
-        factorNameHint: sourceRow.fuelOrMaterialType, // matches "Well-to-tank (WTT) — diesel" / "— petrol"
+        factorNameHint: `Well-to-tank (WTT) — ${sourceRow.fuelOrMaterialType}`,
         year: period.year,
-      }).catch(() => null);
-      if (!wttFactor) return; // e.g. LPG has no seeded WTT factor yet — skip rather than fail the parent save
+      })
+        .catch(() =>
+          this.resolveFactor({
+            organizationId: sourceRow.organizationId,
+            categoryId: scope3FuelEnergyCategory.id,
+            factorNameHint: sourceRow.fuelOrMaterialType,
+            year: period.year,
+          }),
+        )
+        .catch(() => null); // e.g. LPG has no seeded WTT factor yet — skip rather than fail the parent save
 
-      const emissionsKg = this.computeEmissionsKg(sourceRow.quantity, wttFactor.value);
-
-      await this.prisma.activityData.upsert({
-        where: {
-          // No natural unique key on (sourceActivityDataId) alone in the schema, so look up first.
-          // In a real build, add @@unique([sourceActivityDataId, categoryId]) to enforce this at the DB level.
-          id: (await this.findDerivedRow(sourceRow.id, scope3FuelEnergyCategory.id)) ?? '00000000-0000-0000-0000-000000000000',
-        },
-        update: {
-          quantity: sourceRow.quantity,
-          unit: sourceRow.unit,
-          emissionFactorId: wttFactor.id,
-          emissionFactorValueUsed: wttFactor.value,
-          emissionFactorUnitUsed: wttFactor.unit,
-          emissionFactorSourceUsed: wttFactor.source,
-          emissionsKgco2e: emissionsKg,
-          emissionsTco2e: emissionsKg / 1000,
-          updatedBy: sourceRow.enteredBy,
-        },
-        create: {
+      if (wttFactor) {
+        const { emissionsKg } = this.computeWithUnits(sourceRow.quantity, sourceRow.unit, wttFactor);
+        derived = {
           organizationId: sourceRow.organizationId,
           facilityId: sourceRow.facilityId,
           reportingPeriodId: sourceRow.reportingPeriodId,
@@ -142,12 +192,12 @@ export class CalculationEngineService {
           emissionFactorUnitUsed: wttFactor.unit,
           emissionFactorSourceUsed: wttFactor.source,
           sourceActivityDataId: sourceRow.id,
-          derivationNote: 'Auto-derived from linked Scope 1 fuel row; do not edit quantity here — edit the Scope 1 row instead.',
+          derivationNote:
+            'Auto-derived from linked Scope 1 fuel row; do not edit quantity here — edit the Scope 1 row instead.',
           emissionsKgco2e: emissionsKg,
           emissionsTco2e: emissionsKg / 1000,
-          enteredBy: sourceRow.enteredBy,
-        },
-      });
+        };
+      }
     }
 
     // --- Case B: Scope 2 electricity row -> T&D loss derived row ---
@@ -158,32 +208,16 @@ export class CalculationEngineService {
         factorNameHint: 'T&D loss rate',
         year: period.year,
       }).catch(() => null);
-      const gridFactor = await this.resolveFactor({
-        organizationId: sourceRow.organizationId,
-        categoryId: sourceRow.categoryId,
-        year: period.year,
-      }).catch(() => null);
-      if (!tdLossFactor || !gridFactor) return;
+      // Use the exact grid factor the Scope 2 row was calculated with — never re-guess it.
+      const gridFactor = sourceRow.emissionFactorId
+        ? await this.prisma.emissionFactor.findUnique({ where: { id: sourceRow.emissionFactorId } })
+        : null;
 
-      const lostKwh = Number(sourceRow.quantity) * Number(tdLossFactor.value);
-      const emissionsKg = this.computeEmissionsKg(lostKwh, gridFactor.value);
-
-      await this.prisma.activityData.upsert({
-        where: {
-          id: (await this.findDerivedRow(sourceRow.id, scope3FuelEnergyCategory.id)) ?? '00000000-0000-0000-0000-000000000000',
-        },
-        update: {
-          quantity: lostKwh,
-          unit: 'kWh (lost)',
-          emissionFactorId: gridFactor.id,
-          emissionFactorValueUsed: gridFactor.value,
-          emissionFactorUnitUsed: gridFactor.unit,
-          emissionFactorSourceUsed: gridFactor.source,
-          emissionsKgco2e: emissionsKg,
-          emissionsTco2e: emissionsKg / 1000,
-          updatedBy: sourceRow.enteredBy,
-        },
-        create: {
+      if (tdLossFactor && gridFactor) {
+        const kwhDelivered = toFactorUnit(Number(sourceRow.quantity), sourceRow.unit, gridFactor.unit);
+        const lostKwh = kwhDelivered * Number(tdLossFactor.value);
+        const emissionsKg = this.computeEmissionsKg(lostKwh, gridFactor.value);
+        derived = {
           organizationId: sourceRow.organizationId,
           facilityId: sourceRow.facilityId,
           reportingPeriodId: sourceRow.reportingPeriodId,
@@ -197,12 +231,25 @@ export class CalculationEngineService {
           emissionFactorUnitUsed: gridFactor.unit,
           emissionFactorSourceUsed: gridFactor.source,
           sourceActivityDataId: sourceRow.id,
-          derivationNote: 'Auto-derived: source quantity x grid T&D loss rate x grid factor. Do not edit here — edit the Scope 2 row instead.',
+          derivationNote:
+            'Auto-derived: source quantity x grid T&D loss rate x grid factor. Do not edit here — edit the Scope 2 row instead.',
           emissionsKgco2e: emissionsKg,
           emissionsTco2e: emissionsKg / 1000,
-          enteredBy: sourceRow.enteredBy,
-        },
+        };
+      }
+    }
+
+    if (derived && existingId) {
+      const { organizationId, sourceActivityDataId, ...changes } = derived;
+      await this.prisma.activityData.update({
+        where: { id: existingId },
+        data: { ...changes, updatedBy: sourceRow.enteredBy },
       });
+    } else if (derived) {
+      await this.prisma.activityData.create({ data: { ...derived, enteredBy: sourceRow.enteredBy } });
+    } else if (existingId) {
+      // Source no longer produces a derived row — remove the stale one so it stops counting.
+      await this.prisma.activityData.delete({ where: { id: existingId } });
     }
   }
 

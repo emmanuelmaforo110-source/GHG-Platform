@@ -10,6 +10,8 @@ export interface AuthUser {
   fullName: string;
   role: UserRole;
   organizationId: string;
+  organizationName?: string;
+  restrictedFacilityId?: string | null;
 }
 
 export interface LoginResponse {
@@ -73,6 +75,10 @@ export interface ActivityDataRow {
   fuelOrMaterialType: string | null;
   quantity: string;
   unit: string;
+  scope2Method?: 'location_based' | 'market_based' | null;
+  emissionFactorId?: string | null;
+  /** Set on rows calculated automatically from another entry (WTT fuel, grid T&D losses). */
+  sourceActivityDataId?: string | null;
   emissionFactorValueUsed: string;
   emissionFactorUnitUsed: string;
   emissionFactorSourceUsed: string;

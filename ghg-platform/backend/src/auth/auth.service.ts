@@ -51,4 +51,23 @@ export class AuthService {
       },
     };
   }
+
+  /** Fresh user record for GET /auth/me. Rejects deactivated users even if their token is still valid. */
+  async me(userId: string, organizationId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, organizationId, isActive: true },
+      include: { organization: { select: { id: true, name: true } } },
+    });
+    if (!user) throw new UnauthorizedException('Your account is no longer active. Please sign in again.');
+    return {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      organizationId: user.organizationId,
+      organizationName: user.organization.name,
+      restrictedFacilityId: user.restrictedFacilityId,
+      lastLoginAt: user.lastLoginAt,
+    };
+  }
 }

@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, IsPositive, IsString, IsUUID } from 'class-validator';
 
 export class CreateActivityDataDto {
   @IsUUID()
@@ -26,6 +26,7 @@ export class CreateActivityDataDto {
   fuelOrMaterialType?: string; // e.g. "Diesel", "R-410A" — used to disambiguate which factor to pick
 
   @IsNumber()
+  @IsPositive()
   quantity: number;
 
   @IsString()

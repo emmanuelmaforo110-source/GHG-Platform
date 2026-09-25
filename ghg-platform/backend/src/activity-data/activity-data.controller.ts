@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Req, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ActivityDataService } from './activity-data.service';
 import { CreateActivityDataDto } from './dto/create-activity-data.dto';
+import { UpdateActivityDataDto } from './dto/update-activity-data.dto';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -31,10 +32,22 @@ export class ActivityDataController {
     return this.service.create(user, dto, req);
   }
 
+  @Patch(':id')
+  @Roles('admin', 'data_entry')
+  @Audit({ action: 'update', entityType: 'activity_data' })
+  update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateActivityDataDto,
+    @Req() req: any,
+  ) {
+    return this.service.update(user, id, dto, req);
+  }
+
   @Delete(':id')
   @Roles('admin', 'data_entry')
   @Audit({ action: 'delete', entityType: 'activity_data' })
-  remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Req() req: any) {
+  remove(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string, @Req() req: any) {
     return this.service.remove(user, id, req);
   }
 }

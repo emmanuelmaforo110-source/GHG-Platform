@@ -237,11 +237,14 @@ model ActivityData {
   updatedByUser    User?            @relation("UpdatedBy", fields: [updatedBy], references: [id])
 
   // self-reference for derived Scope 3 rows (WTT / T&D loss -> source Scope 1/2 row)
-  sourceActivityData ActivityData?  @relation("Derivation", fields: [sourceActivityDataId], references: [id])
+  // onDelete: Cascade — deleting a Scope 1/2 source row also deletes its automatic WTT / T&D row.
+  sourceActivityData ActivityData?  @relation("Derivation", fields: [sourceActivityDataId], references: [id], onDelete: Cascade)
   derivedRows        ActivityData[] @relation("Derivation")
 
   attachments Attachment[]
 
+  // At most one automatic (derived) row per source row and category.
+  @@unique([sourceActivityDataId, categoryId])
   @@index([reportingPeriodId])
   @@index([categoryId])
   @@index([facilityId])
