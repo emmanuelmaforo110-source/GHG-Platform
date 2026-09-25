@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsNumber, IsOptional, IsPositive, IsString, IsUUID } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Max, Min } from 'class-validator';
 
 /**
  * All fields optional: only the fields sent are changed. The old and new values are written to the
@@ -49,4 +49,18 @@ export class UpdateActivityDataDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  // Scope 2 only: the factor of a contractual instrument (supplier-specific rate, renewable
+  // certificate, green tariff) for the market-based result. Leave empty to use the grid average.
+  // Send null on an update to remove a previously recorded instrument.
+  @IsOptional()
+  @IsUUID()
+  marketEmissionFactorId?: string | null;
+
+  // 1 = metered or supplier-verified data ... 5 = rough estimate. Send null on an update to clear it.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  dataQualityScore?: number | null;
 }

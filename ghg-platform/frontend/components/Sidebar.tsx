@@ -34,6 +34,10 @@ export function Sidebar() {
         {navItem('/dashboard', 'Dashboard', pathname === '/dashboard')}
         <RoleGate allow={['admin', 'data_entry']}>
           {navItem('/activity-data', 'Activity data', pathname === '/activity-data')}
+          {navItem('/activity-data/import', 'Import data', pathname === '/activity-data/import')}
+        </RoleGate>
+        <RoleGate allow={['verifier']}>
+          {navItem('/admin/audit-logs', 'Audit logs', pathname === '/admin/audit-logs')}
         </RoleGate>
 
         <RoleGate allow={['admin']}>

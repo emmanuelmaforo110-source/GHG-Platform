@@ -142,6 +142,7 @@ export class CalculationEngineService {
     quantity: Prisma.Decimal | number;
     unit: string;
     emissionFactorId?: string | null;
+    dataQualityScore?: number | null;
     enteredBy: string;
   }) {
     const sourceCategory = await this.prisma.ghgCategory.findUnique({ where: { id: sourceRow.categoryId } });
@@ -192,6 +193,7 @@ export class CalculationEngineService {
           emissionFactorUnitUsed: wttFactor.unit,
           emissionFactorSourceUsed: wttFactor.source,
           sourceActivityDataId: sourceRow.id,
+          dataQualityScore: sourceRow.dataQualityScore ?? null, // inherits the quality of its source entry
           derivationNote:
             'Auto-derived from linked Scope 1 fuel row; do not edit quantity here — edit the Scope 1 row instead.',
           emissionsKgco2e: emissionsKg,
@@ -231,6 +233,7 @@ export class CalculationEngineService {
           emissionFactorUnitUsed: gridFactor.unit,
           emissionFactorSourceUsed: gridFactor.source,
           sourceActivityDataId: sourceRow.id,
+          dataQualityScore: sourceRow.dataQualityScore ?? null, // inherits the quality of its source entry
           derivationNote:
             'Auto-derived: source quantity x grid T&D loss rate x grid factor. Do not edit here — edit the Scope 2 row instead.',
           emissionsKgco2e: emissionsKg,

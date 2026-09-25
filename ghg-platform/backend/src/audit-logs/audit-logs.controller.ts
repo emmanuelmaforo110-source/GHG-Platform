@@ -6,7 +6,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 
 @Controller('audit-logs')
 @UseGuards(RolesGuard)
-@Roles('admin') // Section 4 RBAC table: only Admin can view audit logs
+@Roles('admin', 'verifier') // Admin, and external verifiers (read-only) who need the audit trail
 export class AuditLogsController {
   constructor(private prisma: PrismaService) {}
 

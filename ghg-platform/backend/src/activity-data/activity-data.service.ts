@@ -1,10 +1,25 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ActivityData } from '@prisma/client';
+import { ActivityData, EmissionFactor, GhgCategory, ReportingPeriod } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CalculationEngineService } from './calculation-engine.service';
 import { CreateActivityDataDto } from './dto/create-activity-data.dto';
 import { UpdateActivityDataDto } from './dto/update-activity-data.dto';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+
+export const GRID_PROXY_NOTE = 'No contractual instrument recorded; grid average used as a proxy for the residual mix.';
+
+/** The calculated part of an entry, before it is saved. Shared by create, update and CSV import. */
+export interface PreparedCalculation {
+  category: GhgCategory;
+  factor: EmissionFactor;
+  convertedQuantity: number;
+  emissionsKg: number;
+  market: {
+    factor: EmissionFactor;
+    emissionsKg: number;
+    note: string;
+  } | null;
+}
 
 @Injectable()
 export class ActivityDataService {
@@ -28,7 +43,7 @@ export class ActivityDataService {
   // ---------------------------------------------------------------------------------------------
 
   /** Loads a reporting period of the caller's organization and ensures it can still be edited. */
-  private async getEditablePeriod(user: AuthenticatedUser, reportingPeriodId: string) {
+  async getEditablePeriod(user: AuthenticatedUser, reportingPeriodId: string) {
     const period = await this.prisma.reportingPeriod.findFirst({
       where: { id: reportingPeriodId, organizationId: user.organizationId },
     });
@@ -40,7 +55,7 @@ export class ActivityDataService {
   }
 
   /** Ensures the facility belongs to the caller's organization and to their facility restriction. */
-  private async assertFacilityAccess(user: AuthenticatedUser, facilityId: string) {
+  async assertFacilityAccess(user: AuthenticatedUser, facilityId: string) {
     if (user.restrictedFacilityId && facilityId !== user.restrictedFacilityId) {
       throw new BadRequestException('You can only enter data for your assigned facility.');
     }
@@ -68,33 +83,88 @@ export class ActivityDataService {
     return existing;
   }
 
-  /**
-   * Resolves the emission factor for a row: an explicit factor id (must be a global default or the
-   * caller's own organization's factor, in the same category), or auto-resolution by category/fuel/year.
-   */
-  private async resolveFactorFor(
-    user: AuthenticatedUser,
-    params: { categoryId: number; fuelOrMaterialType?: string | null; emissionFactorId?: string | null; year: number },
-  ) {
-    if (params.emissionFactorId) {
-      const factor = await this.prisma.emissionFactor.findFirst({
-        where: {
-          id: params.emissionFactorId,
-          OR: [{ organizationId: null }, { organizationId: user.organizationId }],
-        },
-      });
-      if (!factor) throw new NotFoundException('Emission factor not found.');
-      if (factor.categoryId !== params.categoryId) {
-        throw new BadRequestException('The selected emission factor belongs to a different category.');
-      }
-      return factor;
-    }
-    return this.calc.resolveFactor({
-      organizationId: user.organizationId,
-      categoryId: params.categoryId,
-      factorNameHint: params.fuelOrMaterialType,
-      year: params.year,
+  /** An explicitly chosen factor must be a global default or the caller's own, in the given category. */
+  private async getExplicitFactor(user: AuthenticatedUser, factorId: string, categoryId: number, label: string) {
+    const factor = await this.prisma.emissionFactor.findFirst({
+      where: { id: factorId, OR: [{ organizationId: null }, { organizationId: user.organizationId }] },
     });
+    if (!factor) throw new NotFoundException(`${label} not found.`);
+    if (factor.categoryId !== categoryId) {
+      throw new BadRequestException(`The selected ${label.toLowerCase()} belongs to a different category.`);
+    }
+    return factor;
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Calculation (no database writes)
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * Resolves the category and factors and calculates the emissions for one entry, without saving.
+   * For Scope 2 entries it also calculates the market-based result: with the contractual instrument's
+   * factor when one is given, otherwise with the grid average (flagged as a proxy).
+   */
+  async prepare(
+    user: AuthenticatedUser,
+    period: Pick<ReportingPeriod, 'year'>,
+    input: {
+      categoryId: number;
+      fuelOrMaterialType?: string | null;
+      emissionFactorId?: string | null;
+      marketEmissionFactorId?: string | null;
+      quantity: number;
+      unit: string;
+    },
+  ): Promise<PreparedCalculation> {
+    const category = await this.prisma.ghgCategory.findUnique({ where: { id: input.categoryId } });
+    if (!category) throw new NotFoundException('Category not found.');
+
+    const factor = input.emissionFactorId
+      ? await this.getExplicitFactor(user, input.emissionFactorId, input.categoryId, 'Emission factor')
+      : await this.calc.resolveFactor({
+          organizationId: user.organizationId,
+          categoryId: input.categoryId,
+          factorNameHint: input.fuelOrMaterialType,
+          year: period.year,
+        });
+
+    // Converts e.g. MWh -> kWh or gallons -> litres; rejects incompatible units.
+    const { convertedQuantity, emissionsKg } = this.calc.computeWithUnits(input.quantity, input.unit, factor);
+
+    let market: PreparedCalculation['market'] = null;
+    if (category.scope === 'scope_2') {
+      const marketFactor = input.marketEmissionFactorId
+        ? await this.getExplicitFactor(user, input.marketEmissionFactorId, input.categoryId, 'Market-based emission factor')
+        : factor;
+      market = {
+        factor: marketFactor,
+        emissionsKg: this.calc.computeWithUnits(input.quantity, input.unit, marketFactor).emissionsKg,
+        note: input.marketEmissionFactorId ? `Contractual instrument: ${marketFactor.factorName}` : GRID_PROXY_NOTE,
+      };
+    } else if (input.marketEmissionFactorId) {
+      throw new BadRequestException('A market-based emission factor can only be used for Scope 2 (purchased energy) entries.');
+    }
+
+    return { category, factor, convertedQuantity, emissionsKg, market };
+  }
+
+  /** Maps a prepared calculation onto the activity_data columns. */
+  private calculatedColumns(p: PreparedCalculation) {
+    return {
+      emissionFactorId: p.factor.id,
+      emissionFactorValueUsed: p.factor.value,
+      emissionFactorUnitUsed: p.factor.unit,
+      emissionFactorSourceUsed: p.factor.source,
+      emissionsKgco2e: p.emissionsKg,
+      emissionsTco2e: p.emissionsKg / 1000,
+      marketEmissionFactorId: p.market?.factor.id ?? null,
+      marketFactorValueUsed: p.market?.factor.value ?? null,
+      marketFactorUnitUsed: p.market?.factor.unit ?? null,
+      marketFactorSourceUsed: p.market?.factor.source ?? null,
+      marketEmissionsKgco2e: p.market ? p.market.emissionsKg : null,
+      marketEmissionsTco2e: p.market ? p.market.emissionsKg / 1000 : null,
+      marketBasisNote: p.market?.note ?? null,
+    };
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -104,16 +174,7 @@ export class ActivityDataService {
   async create(user: AuthenticatedUser, dto: CreateActivityDataDto, req: any) {
     await this.assertFacilityAccess(user, dto.facilityId);
     const period = await this.getEditablePeriod(user, dto.reportingPeriodId);
-
-    const factor = await this.resolveFactorFor(user, {
-      categoryId: dto.categoryId,
-      fuelOrMaterialType: dto.fuelOrMaterialType,
-      emissionFactorId: dto.emissionFactorId,
-      year: period.year,
-    });
-
-    // Converts e.g. MWh -> kWh or gallons -> litres; rejects incompatible units.
-    const { emissionsKg } = this.calc.computeWithUnits(dto.quantity, dto.unit, factor);
+    const prepared = await this.prepare(user, period, dto);
 
     const row = await this.prisma.activityData.create({
       data: {
@@ -127,12 +188,8 @@ export class ActivityDataService {
         fuelOrMaterialType: dto.fuelOrMaterialType,
         quantity: dto.quantity,
         unit: dto.unit,
-        emissionFactorId: factor.id,
-        emissionFactorValueUsed: factor.value,
-        emissionFactorUnitUsed: factor.unit,
-        emissionFactorSourceUsed: factor.source,
-        emissionsKgco2e: emissionsKg,
-        emissionsTco2e: emissionsKg / 1000,
+        dataQualityScore: dto.dataQualityScore ?? null,
+        ...this.calculatedColumns(prepared),
         notes: dto.notes,
         enteredBy: user.id,
       },
@@ -143,7 +200,7 @@ export class ActivityDataService {
     await this.calc.syncDerivedRows({ ...row, enteredBy: user.id });
 
     // Populate audit context for AuditLogInterceptor (see common/interceptors/audit-log.interceptor.ts)
-    req.auditContext = { entityId: row.id, newValue: row };
+    if (req) req.auditContext = { entityId: row.id, newValue: row };
 
     return row;
   }
@@ -175,6 +232,7 @@ export class ActivityDataService {
       quantity: dto.quantity ?? Number(existing.quantity),
       unit: dto.unit ?? existing.unit,
       notes: dto.notes ?? existing.notes,
+      dataQualityScore: dto.dataQualityScore !== undefined ? dto.dataQualityScore : existing.dataQualityScore,
     };
 
     // Keep the previously used factor unless the caller picked a new one or changed what it depends on.
@@ -184,24 +242,29 @@ export class ActivityDataService {
       targetPeriod.year !== period.year;
     const factorId = dto.emissionFactorId ?? (factorInputsChanged ? null : existing.emissionFactorId);
 
-    const factor = await this.resolveFactorFor(user, {
+    // A previously recorded contractual instrument is kept unless the caller changes or clears it (null).
+    const hadInstrument = !!existing.marketEmissionFactorId && existing.marketEmissionFactorId !== existing.emissionFactorId;
+    const marketFactorId =
+      dto.marketEmissionFactorId !== undefined
+        ? dto.marketEmissionFactorId
+        : hadInstrument && merged.categoryId === existing.categoryId
+          ? existing.marketEmissionFactorId
+          : null;
+
+    const prepared = await this.prepare(user, targetPeriod, {
       categoryId: merged.categoryId,
       fuelOrMaterialType: merged.fuelOrMaterialType,
       emissionFactorId: factorId,
-      year: targetPeriod.year,
+      marketEmissionFactorId: marketFactorId,
+      quantity: merged.quantity,
+      unit: merged.unit,
     });
-    const { emissionsKg } = this.calc.computeWithUnits(merged.quantity, merged.unit, factor);
 
     const row = await this.prisma.activityData.update({
       where: { id },
       data: {
         ...merged,
-        emissionFactorId: factor.id,
-        emissionFactorValueUsed: factor.value,
-        emissionFactorUnitUsed: factor.unit,
-        emissionFactorSourceUsed: factor.source,
-        emissionsKgco2e: emissionsKg,
-        emissionsTco2e: emissionsKg / 1000,
+        ...this.calculatedColumns(prepared),
         updatedBy: user.id,
       },
       include: { category: true },
@@ -209,7 +272,7 @@ export class ActivityDataService {
 
     await this.calc.syncDerivedRows({ ...row, enteredBy: user.id });
 
-    req.auditContext = { entityId: row.id, oldValue: existing, newValue: row };
+    if (req) req.auditContext = { entityId: row.id, oldValue: existing, newValue: row };
     return row;
   }
 
@@ -228,7 +291,7 @@ export class ActivityDataService {
       this.prisma.activityData.delete({ where: { id } }),
     ]);
 
-    req.auditContext = { entityId: id, oldValue: existing };
+    if (req) req.auditContext = { entityId: id, oldValue: existing };
     return { deleted: true, derivedRowsDeleted: derived.count };
   }
 }

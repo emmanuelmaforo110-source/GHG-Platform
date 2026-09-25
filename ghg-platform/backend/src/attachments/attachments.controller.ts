@@ -13,7 +13,7 @@ export class AttachmentsController {
   constructor(private service: AttachmentsService) {}
 
   @Get()
-  @Roles('admin', 'data_entry', 'management')
+  @Roles('admin', 'data_entry', 'management', 'verifier')
   list(@CurrentUser() user: AuthenticatedUser, @Param('activityDataId') activityDataId: string) {
     return this.service.list(user, activityDataId);
   }

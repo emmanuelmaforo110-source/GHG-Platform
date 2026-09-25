@@ -49,7 +49,7 @@ export default function UsersPage() {
     <div className="max-w-3xl space-y-6">
       <div>
         <h1 className="text-lg font-medium">Users</h1>
-        <p className="text-sm text-gray-500">Admin, Data Entry, and Management roles — see the RBAC table in the architecture doc</p>
+        <p className="text-sm text-gray-500">Admin, Data Entry, Management and Verifier (external auditor, read-only) roles</p>
       </div>
 
       {error && <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -69,6 +69,7 @@ export default function UsersPage() {
             <option value="admin">Admin</option>
             <option value="data_entry">Data entry</option>
             <option value="management">Management</option>
+            <option value="verifier">Verifier (external auditor, read-only)</option>
           </select>
         </div>
         <div>

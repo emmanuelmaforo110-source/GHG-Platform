@@ -12,13 +12,13 @@ export class EmissionFactorsController {
   constructor(private service: EmissionFactorsService) {}
 
   @Get('categories')
-  @Roles('admin', 'data_entry', 'management')
+  @Roles('admin', 'data_entry', 'management', 'verifier')
   listCategories() {
     return this.service.listCategories();
   }
 
   @Get()
-  @Roles('admin', 'data_entry', 'management') // read-only view for all roles; only Admin can write (below)
+  @Roles('admin', 'data_entry', 'management', 'verifier') // read-only view for all roles; only Admin can write (below)
   list(@CurrentUser() user: AuthenticatedUser, @Query('year') year?: string) {
     return this.service.list(user, year ? parseInt(year, 10) : undefined);
   }

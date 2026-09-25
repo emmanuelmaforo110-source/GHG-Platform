@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState, FormEvent } from 'react';
+import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import {
-  ActivityDataRow, CreateActivityDataInput, EmissionFactor, Facility, GhgCategory, ReportingPeriod,
+  ActivityDataRow, CreateActivityDataInput, DATA_QUALITY_LABELS, EmissionFactor, Facility, GhgCategory, ReportingPeriod,
 } from '@/lib/types';
 
 const UNIT_SUGGESTIONS: Record<string, string[]> = {
@@ -96,7 +97,13 @@ export default function ActivityDataPage() {
 
     setSubmitting(true);
     try {
-      const payload = { ...form, quantity: Number(form.quantity) };
+      const payload = {
+        ...form,
+        quantity: Number(form.quantity),
+        // On an edit, an emptied instrument / quality score is sent as null so the server clears it.
+        marketEmissionFactorId: form.marketEmissionFactorId || (editingId ? null : undefined),
+        dataQualityScore: form.dataQualityScore ?? (editingId ? null : undefined),
+      };
       const created = editingId
         ? await api.patch<ActivityDataRow>(`/activity-data/${editingId}`, payload)
         : await api.post<ActivityDataRow>('/activity-data', payload);
@@ -134,6 +141,10 @@ export default function ActivityDataPage() {
       quantity: Number(row.quantity),
       unit: row.unit,
       emissionFactorId: row.emissionFactorId ?? undefined,
+      // Only a real contractual instrument is shown; a grid-average proxy has the same id as the grid factor.
+      marketEmissionFactorId:
+        row.marketEmissionFactorId && row.marketEmissionFactorId !== row.emissionFactorId ? row.marketEmissionFactorId : undefined,
+      dataQualityScore: row.dataQualityScore ?? undefined,
       scope2Method: row.scope2Method ?? undefined,
       notes: row.notes ?? undefined,
     });
@@ -173,8 +184,27 @@ export default function ActivityDataPage() {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h1 className="text-lg font-medium">Activity data</h1>
-        <p className="text-sm text-gray-500">Enter Scope 1, 2, or 3 activity data for a reporting period</p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-lg font-medium">Activity data</h1>
+            <p className="text-sm text-gray-500">Enter Scope 1, 2, or 3 activity data for a reporting period</p>
+          </div>
+          <div className="flex gap-2">
+            <Link href="/activity-data/import" className="btn-secondary">Import from Excel / CSV</Link>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={!form.reportingPeriodId}
+              onClick={() =>
+                api
+                  .download(`/activity-data/export?reportingPeriodId=${form.reportingPeriodId}`, 'activity-data.csv')
+                  .catch((err) => setError(err instanceof ApiError ? err.message : 'Export failed.'))
+              }
+            >
+              Export CSV
+            </button>
+          </div>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="card space-y-4">
@@ -289,6 +319,28 @@ export default function ActivityDataPage() {
           </div>
         )}
 
+        {selectedCategory?.scope === 'scope_2' && (
+          <div>
+            <label>Contractual instrument for the market-based result (optional)</label>
+            <select
+              value={form.marketEmissionFactorId ?? ''}
+              disabled={!periodIsEditable}
+              onChange={(e) => setForm((f) => ({ ...f, marketEmissionFactorId: e.target.value || undefined }))}
+            >
+              <option value="">None — use the grid average</option>
+              {categoryFactors.map((factor) => (
+                <option key={factor.id} value={factor.id}>
+                  {factor.factorName} ({factor.validYear}) — {factor.value} {factor.unit}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-400">
+              Choose a supplier-specific rate, renewable energy certificate or green tariff if you have one. Both the
+              location-based and market-based results are saved.
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <label>Fuel / material type</label>
@@ -342,6 +394,21 @@ export default function ActivityDataPage() {
         )}
 
         <div>
+          <label>Data quality</label>
+          <select
+            value={form.dataQualityScore ?? ''}
+            disabled={!periodIsEditable}
+            onChange={(e) => setForm((f) => ({ ...f, dataQualityScore: e.target.value ? Number(e.target.value) : undefined }))}
+          >
+            <option value="">Not scored yet</option>
+            {[1, 2, 3, 4, 5].map((q) => (
+              <option key={q} value={q}>{DATA_QUALITY_LABELS[q]}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-gray-400">How reliable is this number? Verifiers use this to decide what to check first.</p>
+        </div>
+
+        <div>
           <label>Notes</label>
           <textarea
             rows={2}
@@ -389,6 +456,7 @@ export default function ActivityDataPage() {
                 <th className="py-2 font-normal">Source</th>
                 <th className="py-2 font-normal">Category</th>
                 <th className="py-2 font-normal">Quantity</th>
+                <th className="py-2 font-normal">Quality</th>
                 <th className="py-2 text-right font-normal">tCO2e</th>
                 <th className="py-2 text-right font-normal"><span className="sr-only">Actions</span></th>
               </tr>
@@ -399,7 +467,15 @@ export default function ActivityDataPage() {
                   <td className="py-2">{r.sourceName}</td>
                   <td className="py-2 text-gray-500">{r.category.name}</td>
                   <td className="py-2 text-gray-500">{Number(r.quantity).toLocaleString()} {r.unit}</td>
-                  <td className="py-2 text-right">{Number(r.emissionsTco2e).toFixed(4)}</td>
+                  <td className="py-2 text-gray-500" title={r.dataQualityScore ? DATA_QUALITY_LABELS[r.dataQualityScore] : 'Not scored yet'}>
+                    {r.dataQualityScore ?? '—'}
+                  </td>
+                  <td className="py-2 text-right">
+                    {Number(r.emissionsTco2e).toFixed(4)}
+                    {r.marketEmissionsTco2e != null && Number(r.marketEmissionsTco2e) !== Number(r.emissionsTco2e) && (
+                      <span className="block text-xs text-gray-400">market-based {Number(r.marketEmissionsTco2e).toFixed(4)}</span>
+                    )}
+                  </td>
                   <td className="py-2 text-right whitespace-nowrap">
                     {r.sourceActivityDataId ? (
                       <span className="text-xs text-gray-400" title="Calculated automatically from a Scope 1 or Scope 2 entry">

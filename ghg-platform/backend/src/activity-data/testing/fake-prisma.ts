@@ -18,6 +18,8 @@ function matches(row: Row, where: Row = {}): boolean {
     const value = row[key];
     if (cond !== null && typeof cond === 'object' && !(cond instanceof Date)) {
       if ('lt' in cond) return value < cond.lt;
+      if ('lte' in cond) return value <= cond.lte;
+      if ('gte' in cond) return value >= cond.gte;
       if ('in' in cond) return cond.in.includes(value);
       if ('equals' in cond) return value === cond.equals;
       return false;
@@ -26,32 +28,48 @@ function matches(row: Row, where: Row = {}): boolean {
   });
 }
 
-function model(table: Row[]) {
-  const sorted = (rows: Row[], orderBy?: Row) => {
+// Supports `include: { category: true, facility: true }` style lookups via "<name>Id" foreign keys.
+type Tables = Record<string, Row[]>;
+const TABLE_FOR: Record<string, string> = { category: 'ghgCategory', facility: 'facility', reportingPeriod: 'reportingPeriod' };
+
+function model(table: Row[], tables: Tables) {
+  const withIncludes = (r: Row | undefined, include?: Row): any => {
+    const c = copy(r);
+    if (!c || !include) return c;
+    for (const [rel, on] of Object.entries(include)) {
+      if (!on) continue;
+      const target = tables[TABLE_FOR[rel] ?? rel];
+      if (target) c[rel] = copy(target.find((t) => t.id === c[`${rel}Id`]));
+    }
+    return c;
+  };
+  const sorted = (rows: Row[], orderBy?: Row | Row[]) => {
     if (!orderBy) return rows;
-    const [[field, dir]] = Object.entries(orderBy);
+    const [[field, dir]] = Object.entries(Array.isArray(orderBy) ? orderBy[0] : orderBy);
     return [...rows].sort((a, b) => (a[field] < b[field] ? -1 : a[field] > b[field] ? 1 : 0) * (dir === 'desc' ? -1 : 1));
   };
   return {
     // Results are copies, like real Prisma, so later updates don't change objects already returned.
-    findMany: async (args: Row = {}) => sorted(table.filter((r) => matches(r, args.where)), args.orderBy).map(copy),
-    findFirst: async (args: Row = {}) => copy(sorted(table.filter((r) => matches(r, args.where)), args.orderBy)[0]),
-    findUnique: async (args: Row) => copy(table.find((r) => matches(r, args.where))),
+    findMany: async (args: Row = {}) =>
+      sorted(table.filter((r) => matches(r, args.where)), args.orderBy).map((r) => withIncludes(r, args.include)),
+    findFirst: async (args: Row = {}) =>
+      withIncludes(sorted(table.filter((r) => matches(r, args.where)), args.orderBy)[0], args.include),
+    findUnique: async (args: Row) => withIncludes(table.find((r) => matches(r, args.where)), args.include),
     findUniqueOrThrow: async (args: Row) => {
       const r = table.find((x) => matches(x, args.where));
       if (!r) throw new Error('Record not found');
       return copy(r);
     },
     create: async (args: Row) => {
-      const row = { id: randomUUID(), sourceActivityDataId: null, ...args.data };
+      const row = { id: randomUUID(), sourceActivityDataId: null, enteredAt: new Date(), updatedAt: new Date(), ...args.data };
       table.push(row);
-      return copy(row);
+      return withIncludes(row, args.include);
     },
     update: async (args: Row) => {
       const row = table.find((r) => matches(r, args.where));
       if (!row) throw new Error('Record to update not found');
       Object.assign(row, args.data);
-      return copy(row);
+      return withIncludes(row, args.include);
     },
     delete: async (args: Row) => {
       const idx = table.findIndex((r) => matches(r, args.where));
@@ -89,11 +107,11 @@ export function createFakePrisma(seed: {
   };
   return {
     tables,
-    ghgCategory: model(tables.ghgCategory),
-    emissionFactor: model(tables.emissionFactor),
-    reportingPeriod: model(tables.reportingPeriod),
-    facility: model(tables.facility),
-    activityData: model(tables.activityData),
+    ghgCategory: model(tables.ghgCategory, tables),
+    emissionFactor: model(tables.emissionFactor, tables),
+    reportingPeriod: model(tables.reportingPeriod, tables),
+    facility: model(tables.facility, tables),
+    activityData: model(tables.activityData, tables),
     $transaction: async (ops: Promise<any>[]) => Promise.all(ops),
   };
 }

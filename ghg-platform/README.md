@@ -12,6 +12,25 @@ budget time for the inevitable small fixes (a typo, a version mismatch) on first
 
 ---
 
+## Phase 1, part 1 (audit-grade inventory) — what changed
+
+These changes are on the Git branch `phase-1-inventory` (built on top of `phase-0-stabilise`).
+
+| Area | Change |
+| --- | --- |
+| Import from Excel / CSV | New **Import data** page. Download the template, fill it in Excel, save as CSV, upload. Step 1 checks and calculates every row without saving; step 2 saves them — only if every row is valid, so a file is never half-imported. Errors are shown per line (e.g. wrong unit, unknown category). API: `GET /api/activity-data/import/template`, `POST /api/activity-data/import?reportingPeriodId=…&commit=false|true`. |
+| Export | **Export CSV** on the Activity data page and the Dashboard: every entry with its factor, source, location- and market-based results, quality score and automatic-row link. API: `GET /api/activity-data/export?reportingPeriodId=…` (recorded in the audit log). |
+| Scope 2 — both methods | Every Scope 2 entry now stores a location-based result (grid average — the headline, as in the workbook) and a market-based result (the electricity contract / certificate chosen, or the grid average flagged as a proxy when none is recorded). The dashboard shows both. |
+| Data quality score | Each entry can be scored 1 (metered / supplier-verified) to 5 (rough estimate); automatic rows inherit the score of their source. The dashboard shows the emissions-weighted score per scope and how much of the total is scored. |
+| Verifier role | New read-only **Verifier** role for external auditors: can see the dashboard, entries, evidence files, emission factors, audit log and exports, but cannot change anything. |
+| User invitations | Validated: email format, role, password of at least 8 characters, facility must belong to the organisation, no duplicate emails. |
+| Database | Migration `20260925150000_phase1_quality_market_verifier` (existing Scope 2 rows get a market-based result equal to their location-based one, flagged as a proxy). |
+| Tests | 49 unit tests. New: market-based results, quality score, dashboard, CSV import (the whole reference workbook imported from CSV reproduces 28.1116 tCO2e), export and CSV safety. |
+
+After pulling this branch: in `backend/` run `npx prisma migrate deploy` and `npx prisma generate`, then restart the API.
+
+Still to come in Phase 1: per-gas results (CO2, CH4, N2O) with a choice of IPCC AR5/AR6 warming values, the 15 Scope 3 categories with spend-based and supplier-specific methods, PDF report export, and the larger emission-factor library.
+
 ## Phase 0 (stabilise) — what changed
 
 These changes are on the Git branch `phase-0-stabilise`, for review before merging into `main`.

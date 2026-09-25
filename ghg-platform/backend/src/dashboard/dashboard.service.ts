@@ -19,12 +19,33 @@ export class DashboardService {
     });
 
     const byScope = { scope_1: 0, scope_2: 0, scope_3: 0 } as Record<string, number>;
-    const byActivity: { sourceName: string; scope: string; tco2e: number }[] = [];
+    const byActivity: { sourceName: string; scope: string; tco2e: number; dataQualityScore: number | null }[] = [];
+    let scope2MarketBased = 0;
+    // Data quality: emissions-weighted average of the 1-5 scores, over the rows that have a score.
+    const quality = {
+      all: { weighted: 0, scoredT: 0 },
+      scope_1: { weighted: 0, scoredT: 0 },
+      scope_2: { weighted: 0, scoredT: 0 },
+      scope_3: { weighted: 0, scoredT: 0 },
+    } as Record<string, { weighted: number; scoredT: number }>;
 
     for (const row of rows) {
       const tco2e = Number(row.emissionsTco2e);
-      byScope[row.category.scope] += tco2e;
-      byActivity.push({ sourceName: row.sourceName, scope: row.category.scope, tco2e });
+      const scope = row.category.scope;
+      byScope[scope] += tco2e;
+      if (scope === 'scope_2') {
+        // Market-based: the contractual-instrument result, or the location-based one if none was recorded.
+        scope2MarketBased += row.marketEmissionsTco2e !== null && row.marketEmissionsTco2e !== undefined
+          ? Number(row.marketEmissionsTco2e)
+          : tco2e;
+      }
+      if (row.dataQualityScore) {
+        for (const key of ['all', scope]) {
+          quality[key].weighted += row.dataQualityScore * tco2e;
+          quality[key].scoredT += tco2e;
+        }
+      }
+      byActivity.push({ sourceName: row.sourceName, scope, tco2e, dataQualityScore: row.dataQualityScore ?? null });
     }
 
     const total = byScope.scope_1 + byScope.scope_2 + byScope.scope_3;
@@ -32,13 +53,33 @@ export class DashboardService {
 
     const largestScope = Object.entries(byScope).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
+    const totalMarketBased = byScope.scope_1 + scope2MarketBased + byScope.scope_3;
+    const qualityOf = (key: string, scopeTotal: number) => ({
+      // 1 = best ... 5 = weakest; null when no entry in this group has a score yet
+      weightedScore: quality[key].scoredT > 0 ? round(quality[key].weighted / quality[key].scoredT, 2) : null,
+      // share of the group's emissions that has a quality score
+      scoredShare: scopeTotal > 0 ? round(quality[key].scoredT / scopeTotal, 4) : null,
+    });
+
     return {
       reportingPeriod: { id: period.id, year: period.year, isBaseYear: period.isBaseYear, status: period.status },
       totals: {
         scope1Tco2e: round(byScope.scope_1),
-        scope2Tco2e: round(byScope.scope_2),
+        scope2Tco2e: round(byScope.scope_2), // location-based (headline, as in the reference workbook)
         scope3Tco2e: round(byScope.scope_3),
         totalTco2e: round(total),
+      },
+      // GHG Protocol Scope 2 Guidance: report both methods.
+      scope2: {
+        locationBasedTco2e: round(byScope.scope_2),
+        marketBasedTco2e: round(scope2MarketBased),
+        totalMarketBasedTco2e: round(totalMarketBased),
+      },
+      dataQuality: {
+        overall: qualityOf('all', total),
+        scope1: qualityOf('scope_1', byScope.scope_1),
+        scope2: qualityOf('scope_2', byScope.scope_2),
+        scope3: qualityOf('scope_3', byScope.scope_3),
       },
       shareOfTotal: total > 0 ? {
         scope1: round(byScope.scope_1 / total),
@@ -109,7 +150,7 @@ export class DashboardService {
     const quantifiedCategoryIds = new Set(
       (
         await this.prisma.activityData.findMany({
-          where: { reportingPeriodId, category: { scope: 'scope_3' } },
+          where: { organizationId: user.organizationId, reportingPeriodId, category: { scope: 'scope_3' } },
           select: { categoryId: true },
           distinct: ['categoryId'],
         })

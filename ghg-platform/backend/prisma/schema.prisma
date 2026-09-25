@@ -16,6 +16,7 @@ enum UserRole {
   admin
   data_entry
   management
+  verifier // external auditor / verifier: read-only access to data, evidence, audit log and exports
 }
 
 enum GhgScope {
@@ -219,6 +220,19 @@ model ActivityData {
 
   emissionsKgco2e             Decimal @map("emissions_kgco2e") @db.Decimal(16, 4)
   emissionsTco2e               Decimal @map("emissions_tco2e") @db.Decimal(16, 6) // computed in service layer on save
+
+  // Scope 2 dual reporting (GHG Protocol Scope 2 Guidance). The fields above hold the
+  // location-based result for Scope 2 rows; these hold the market-based result.
+  marketEmissionFactorId       String?  @map("market_emission_factor_id") @db.Uuid
+  marketFactorValueUsed        Decimal? @map("market_factor_value_used") @db.Decimal(14, 6)
+  marketFactorUnitUsed         String?  @map("market_factor_unit_used")
+  marketFactorSourceUsed       String?  @map("market_factor_source_used")
+  marketEmissionsKgco2e        Decimal? @map("market_emissions_kgco2e") @db.Decimal(16, 4)
+  marketEmissionsTco2e         Decimal? @map("market_emissions_tco2e") @db.Decimal(16, 6)
+  marketBasisNote              String?  @map("market_basis_note")
+
+  // Data quality score, 1 = best (metered / supplier-verified) to 5 = weakest (rough estimate).
+  dataQualityScore             Int?     @map("data_quality_score")
 
   notes                         String?
   status                         ReportingStatus @default(draft)

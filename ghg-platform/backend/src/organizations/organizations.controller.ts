@@ -13,7 +13,7 @@ export class OrganizationsController {
   constructor(private prisma: PrismaService) {}
 
   @Get()
-  @Roles('admin', 'data_entry', 'management')
+  @Roles('admin', 'data_entry', 'management', 'verifier')
   get(@CurrentUser() user: AuthenticatedUser) {
     return this.prisma.organization.findUnique({ where: { id: user.organizationId } });
   }

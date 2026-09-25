@@ -2,7 +2,7 @@
 // controllers under backend/src/). Kept as plain types, not generated, since there's no shared
 // package boundary in this MVP — see README "What's next" if you later add a monorepo/OpenAPI step.
 
-export type UserRole = 'admin' | 'data_entry' | 'management';
+export type UserRole = 'admin' | 'data_entry' | 'management' | 'verifier';
 
 export interface AuthUser {
   id: string;
@@ -79,6 +79,12 @@ export interface ActivityDataRow {
   emissionFactorId?: string | null;
   /** Set on rows calculated automatically from another entry (WTT fuel, grid T&D losses). */
   sourceActivityDataId?: string | null;
+  /** 1 = best (metered / supplier-verified) ... 5 = weakest (rough estimate). */
+  dataQualityScore?: number | null;
+  /** Scope 2 only: market-based result next to the location-based one. */
+  marketEmissionFactorId?: string | null;
+  marketEmissionsTco2e?: string | null;
+  marketBasisNote?: string | null;
   emissionFactorValueUsed: string;
   emissionFactorUnitUsed: string;
   emissionFactorSourceUsed: string;
@@ -102,6 +108,8 @@ export interface CreateActivityDataInput {
   unit: string;
   emissionFactorId?: string;
   notes?: string;
+  marketEmissionFactorId?: string | null;
+  dataQualityScore?: number | null;
 }
 
 export interface DashboardSummary {
@@ -110,8 +118,39 @@ export interface DashboardSummary {
   shareOfTotal: { scope1: number; scope2: number; scope3: number } | null;
   emissionsPerEmployee: number | null;
   largestScope: string | null;
-  byActivity: { sourceName: string; scope: string; tco2e: number }[];
+  byActivity: { sourceName: string; scope: string; tco2e: number; dataQualityScore: number | null }[];
+  scope2: { locationBasedTco2e: number; marketBasedTco2e: number; totalMarketBasedTco2e: number };
+  dataQuality: Record<'overall' | 'scope1' | 'scope2' | 'scope3', { weightedScore: number | null; scoredShare: number | null }>;
 }
+
+export interface ImportRowResult {
+  line: number;
+  ok: boolean;
+  errors: string[];
+  sourceName?: string;
+  category?: string;
+  facility?: string;
+  quantity?: number;
+  unit?: string;
+  emissionFactor?: string;
+  emissionsTco2e?: number;
+  marketEmissionsTco2e?: number | null;
+}
+
+export interface ImportResult {
+  committed: boolean;
+  created: number;
+  summary: { rows: number; valid: number; invalid: number; totalTco2e: number };
+  rows: ImportRowResult[];
+}
+
+export const DATA_QUALITY_LABELS: Record<number, string> = {
+  1: '1 — Metered or supplier-verified',
+  2: '2 — From invoices / receipts',
+  3: '3 — Calculated from partial records',
+  4: '4 — Industry average or benchmark',
+  5: '5 — Rough estimate',
+};
 
 export interface PeriodOverPeriodRow {
   year: number;

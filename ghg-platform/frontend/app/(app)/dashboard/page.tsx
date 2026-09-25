@@ -89,6 +89,19 @@ export default function DashboardPage() {
           <h1 className="text-lg font-medium">Emissions dashboard</h1>
           <p className="text-sm text-gray-500">Scope 1, 2 & 3 totals for the selected reporting period</p>
         </div>
+        <div className="flex w-full gap-2 sm:w-auto">
+        <button
+          type="button"
+          className="btn-secondary whitespace-nowrap"
+          disabled={!selectedPeriodId}
+          onClick={() =>
+            api
+              .download(`/activity-data/export?reportingPeriodId=${selectedPeriodId}`, 'activity-data.csv')
+              .catch((err) => setError(err instanceof ApiError ? err.message : 'Export failed.'))
+          }
+        >
+          Export CSV
+        </button>
         <select
           value={selectedPeriodId}
           onChange={(e) => setSelectedPeriodId(e.target.value)}
@@ -100,6 +113,7 @@ export default function DashboardPage() {
             </option>
           ))}
         </select>
+        </div>
       </div>
 
       {summary && (
@@ -121,6 +135,37 @@ export default function DashboardPage() {
             <MetricCard label="Scope 2" value={summary.totals.scope2Tco2e.toFixed(2)} unit={`tCO2e · ${((summary.shareOfTotal?.scope2 ?? 0) * 100).toFixed(0)}%`} />
             <MetricCard label="Scope 3" value={summary.totals.scope3Tco2e.toFixed(2)} unit={`tCO2e · ${((summary.shareOfTotal?.scope3 ?? 0) * 100).toFixed(0)}%`} />
             <MetricCard label="Total" value={summary.totals.totalTco2e.toFixed(2)} unit="tCO2e" accent />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="card">
+              <p className="text-sm font-medium">Scope 2 — both methods</p>
+              <p className="mb-2 text-xs text-gray-500">
+                The headline uses the location-based result (grid average). The market-based result uses your electricity
+                contracts or certificates where recorded.
+              </p>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Location-based</span><span>{summary.scope2.locationBasedTco2e.toFixed(2)} tCO2e</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Market-based</span><span>{summary.scope2.marketBasedTco2e.toFixed(2)} tCO2e</span></div>
+              <div className="mt-1 flex justify-between border-t border-gray-100 pt-1 text-sm"><span className="text-gray-600">Total using market-based Scope 2</span><span>{summary.scope2.totalMarketBasedTco2e.toFixed(2)} tCO2e</span></div>
+            </div>
+            <div className="card">
+              <p className="text-sm font-medium">Data quality</p>
+              <p className="mb-2 text-xs text-gray-500">Emissions-weighted score: 1 = metered or supplier-verified, 5 = rough estimate.</p>
+              {(['overall', 'scope1', 'scope2', 'scope3'] as const).map((key) => {
+                const q = summary.dataQuality[key];
+                return (
+                  <div key={key} className="flex justify-between text-sm">
+                    <span className="text-gray-600">{key === 'overall' ? 'All scopes' : key.replace('scope', 'Scope ')}</span>
+                    <span>
+                      {q.weightedScore !== null ? q.weightedScore.toFixed(1) : 'Not scored'}
+                      {q.scoredShare !== null && q.scoredShare < 1 && (
+                        <span className="ml-1 text-xs text-gray-400">({Math.round(q.scoredShare * 100)}% of emissions scored)</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {summary.emissionsPerEmployee !== null && (

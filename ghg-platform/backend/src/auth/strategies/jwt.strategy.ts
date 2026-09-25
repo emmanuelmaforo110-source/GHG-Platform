@@ -5,7 +5,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 export interface JwtPayload {
   sub: string; // user id
   organizationId: string;
-  role: 'admin' | 'data_entry' | 'management';
+  role: 'admin' | 'data_entry' | 'management' | 'verifier';
   restrictedFacilityId: string | null;
   email: string;
 }

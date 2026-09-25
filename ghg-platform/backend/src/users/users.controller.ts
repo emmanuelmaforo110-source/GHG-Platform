@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards, UseInterceptors } from '@nestjs/common';
 import { UsersService } from './users.service';
+import { InviteUserDto } from './dto/invite-user.dto';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -19,7 +20,7 @@ export class UsersController {
 
   @Post()
   @Audit({ action: 'create', entityType: 'users' })
-  invite(@CurrentUser() user: AuthenticatedUser, @Body() dto: any) {
+  invite(@CurrentUser() user: AuthenticatedUser, @Body() dto: InviteUserDto) {
     return this.service.invite(user, dto);
   }
 

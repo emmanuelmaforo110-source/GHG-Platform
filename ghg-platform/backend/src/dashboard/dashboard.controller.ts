@@ -6,7 +6,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 
 @Controller('dashboard')
 @UseGuards(RolesGuard)
-@Roles('admin', 'data_entry', 'management') // all three roles can view; RolesGuard on write endpoints elsewhere blocks mutation
+@Roles('admin', 'data_entry', 'management', 'verifier') // all three roles can view; RolesGuard on write endpoints elsewhere blocks mutation
 export class DashboardController {
   constructor(private service: DashboardService) {}
 

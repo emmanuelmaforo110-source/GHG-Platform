@@ -12,7 +12,7 @@ export class ReportingPeriodsController {
   constructor(private service: ReportingPeriodsService) {}
 
   @Get()
-  @Roles('admin', 'data_entry', 'management')
+  @Roles('admin', 'data_entry', 'management', 'verifier')
   list(@CurrentUser() user: AuthenticatedUser) {
     return this.service.list(user);
   }

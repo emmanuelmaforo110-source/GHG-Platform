@@ -23,7 +23,7 @@ export default function AuditLogsPage() {
     <div className="max-w-4xl space-y-6">
       <div>
         <h1 className="text-lg font-medium">Audit logs</h1>
-        <p className="text-sm text-gray-500">Append-only record of who changed what — Admin only</p>
+        <p className="text-sm text-gray-500">Append-only record of who changed what — visible to Admins and Verifiers</p>
       </div>
 
       <div className="card overflow-x-auto">
