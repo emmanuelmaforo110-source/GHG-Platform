@@ -56,4 +56,10 @@ export class CreateActivityDataDto {
   @Min(1)
   @Max(5)
   dataQualityScore?: number | null;
+
+  // activity_based (default) or spend_based follow the chosen emission factor automatically;
+  // supplier_specific = the supplier's reported emissions entered directly (unit "kg CO2e" or "t CO2e").
+  @IsOptional()
+  @IsIn(['activity_based', 'spend_based', 'supplier_specific'])
+  calculationMethod?: 'activity_based' | 'spend_based' | 'supplier_specific';
 }

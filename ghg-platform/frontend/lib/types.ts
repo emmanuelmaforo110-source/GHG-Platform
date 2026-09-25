@@ -50,7 +50,27 @@ export interface EmissionFactor {
   notes: string | null;
   isDefault: boolean;
   isReviewed: boolean;
+  /** Optional split by gas, kg of each gas per unit. */
+  co2PerUnit?: string | null;
+  ch4PerUnit?: string | null;
+  n2oPerUnit?: string | null;
 }
+
+export type GwpSet = 'AR5' | 'AR6';
+export type BoundaryApproach = 'operational_control' | 'financial_control' | 'equity_share';
+export type CalculationMethod = 'activity_based' | 'spend_based' | 'supplier_specific';
+
+export const BOUNDARY_LABELS: Record<BoundaryApproach, string> = {
+  operational_control: 'Operational control',
+  financial_control: 'Financial control',
+  equity_share: 'Equity share',
+};
+
+export const METHOD_LABELS: Record<CalculationMethod, string> = {
+  activity_based: 'Activity-based (quantity × factor)',
+  spend_based: 'Spend-based (money spent × factor)',
+  supplier_specific: 'Supplier-specific (emissions reported by the supplier)',
+};
 
 export type ReportingStatus = 'draft' | 'submitted' | 'approved' | 'locked';
 
@@ -62,6 +82,8 @@ export interface ReportingPeriod {
   status: ReportingStatus;
   staffFte: string | null;
   recalculationThresholdPct: string;
+  gwpSet?: GwpSet;
+  boundaryApproach?: BoundaryApproach;
 }
 
 export interface ActivityDataRow {
@@ -85,6 +107,11 @@ export interface ActivityDataRow {
   marketEmissionFactorId?: string | null;
   marketEmissionsTco2e?: string | null;
   marketBasisNote?: string | null;
+  calculationMethod?: CalculationMethod;
+  co2Kg?: string | null;
+  ch4Kg?: string | null;
+  n2oKg?: string | null;
+  gwpSetUsed?: GwpSet | null;
   emissionFactorValueUsed: string;
   emissionFactorUnitUsed: string;
   emissionFactorSourceUsed: string;
@@ -110,6 +137,51 @@ export interface CreateActivityDataInput {
   notes?: string;
   marketEmissionFactorId?: string | null;
   dataQualityScore?: number | null;
+  calculationMethod?: CalculationMethod;
+}
+
+export interface Scope3ScreeningRow {
+  categoryId: number;
+  categoryNo: number | null;
+  category: string;
+  isIncluded: boolean | null;
+  relevanceAssessment: string | null;
+  assessedAt: string | null;
+  entries: number;
+  tco2e: number;
+}
+
+export interface InventoryReport {
+  generatedAt: string;
+  organization: { name: string; country: string | null };
+  facilities: { name: string; country: string | null; isActive: boolean }[];
+  period: {
+    year: number;
+    status: ReportingStatus;
+    isBaseYear: boolean;
+    boundaryApproach: BoundaryApproach;
+    gwpSet: GwpSet;
+    staffFte: number | null;
+    recalculationThresholdPct: number;
+    submittedBy: string | null;
+    submittedAt: string | null;
+    approvedBy: string | null;
+    approvedAt: string | null;
+  };
+  gwpValues: { co2: number; ch4: number; n2o: number; label: string };
+  summary: DashboardSummary;
+  byCategory: { scope: string; category: string; entries: number; tco2e: number }[];
+  byGas: { co2Tonnes: number; ch4Tonnes: number; n2oTonnes: number; shareOfEmissionsSplitByGas: number | null };
+  byMethod: { method: CalculationMethod; tco2e: number }[];
+  scope3Screening: {
+    categoryNo: number | null;
+    category: string;
+    status: 'quantified' | 'included_not_quantified' | 'excluded' | 'not_screened';
+    tco2e: number;
+    reason: string | null;
+  }[];
+  factorsUsed: { name: string; value: number; unit: string; source: string; year: number | null; entries: number }[];
+  history: PeriodOverPeriodRow[];
 }
 
 export interface DashboardSummary {

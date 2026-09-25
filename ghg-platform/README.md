@@ -12,6 +12,25 @@ budget time for the inevitable small fixes (a typo, a version mismatch) on first
 
 ---
 
+## Phase 1, part 2 — what changed
+
+Also on the branch `phase-1-inventory`.
+
+| Area | Change |
+| --- | --- |
+| Results per gas + AR5/AR6 | Emission factors can be split by gas (kg of CO2, CH4 and N2O per unit). For those, each entry stores the mass of each gas and CO2e is calculated with the reporting period's GWP set: IPCC AR6 (default; CH4 29.8, N2O 273) or AR5 (CH4 28, N2O 265). Switching a draft period between AR5 and AR6 recalculates all its entries. Factors published only in CO2e (all current seed factors) are used as published. See `backend/src/activity-data/gwp.ts`. |
+| Scope 3 methods | Every entry records its method: **activity-based** (quantity × factor), **spend-based** (automatic when the factor is per currency, e.g. `kg CO2e / USD`; spend must be in the factor's currency) or **supplier-specific** (the supplier's reported emissions entered directly in kg or t CO2e). Upstream WTT / T&D rows are only derived from physical quantities. The CSV import has a new optional `method` column (`supplier`). |
+| Scope 3 screening | New **Scope 3 screening** page and `GET/PUT /api/reporting-periods/:id/scope3-screening`: for each of the 15 categories record Included / Excluded with a reason; the page shows which are quantified. |
+| Inventory report | New **Inventory report** page (`GET /api/dashboard/report/:periodId`): summary, boundary and method (GWP values, Scope 2 methods), emissions by category, gases and methods, Scope 3 inclusion/exclusion table, data quality, emission factors used with sources, year-on-year, and the review/approval trail. **Print / Save as PDF** produces the PDF. |
+| Emission factors | Admins can **add** organisation-specific factors (supplier-specific, verified local or spend-based), optionally split by gas; input is validated. |
+| Reporting periods | Created with boundary approach and GWP set; draft settings can be changed (`PATCH /api/reporting-periods/:id`); duplicate years are refused; the year-on-year query now runs as one query. |
+| Database | Migration `20260925170000_phase1_gases_methods`. |
+| Tests | 62 unit tests (new: GWP values, per-gas results, AR5/AR6 switch, supplier-specific and spend-based methods, Scope 3 screening, inventory report). |
+
+After pulling: in `backend/` run `npx prisma migrate deploy` and `npx prisma generate`, then restart the API.
+
+Not included on purpose: a larger emission-factor library. Adding hundreds of factors needs each value taken from its published source (DEFRA/DESNZ, IPCC, national data) and checked; this should be done as a separate, reviewed data task rather than typed in by hand.
+
 ## Phase 1, part 1 (audit-grade inventory) — what changed
 
 These changes are on the Git branch `phase-1-inventory` (built on top of `phase-0-stabilise`).
@@ -29,7 +48,7 @@ These changes are on the Git branch `phase-1-inventory` (built on top of `phase-
 
 After pulling this branch: in `backend/` run `npx prisma migrate deploy` and `npx prisma generate`, then restart the API.
 
-Still to come in Phase 1: per-gas results (CO2, CH4, N2O) with a choice of IPCC AR5/AR6 warming values, the 15 Scope 3 categories with spend-based and supplier-specific methods, PDF report export, and the larger emission-factor library.
+Phase 1 part 2 (below) adds per-gas results, Scope 3 methods and screening, and the printable report.
 
 ## Phase 0 (stabilise) — what changed
 

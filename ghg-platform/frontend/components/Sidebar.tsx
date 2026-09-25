@@ -22,7 +22,7 @@ export function Sidebar() {
   const { user, logout } = useAuth();
 
   return (
-    <aside className="flex w-full shrink-0 flex-col border-b border-gray-200 bg-white md:h-screen md:w-60 md:border-b-0 md:border-r">
+    <aside className="flex w-full shrink-0 print:hidden flex-col border-b border-gray-200 bg-white md:h-screen md:w-60 md:border-b-0 md:border-r">
       <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-4">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-medium text-white">
           G
@@ -32,6 +32,8 @@ export function Sidebar() {
 
       <nav className="flex flex-1 gap-1 overflow-x-auto p-3 md:block md:space-y-1">
         {navItem('/dashboard', 'Dashboard', pathname === '/dashboard')}
+        {navItem('/report', 'Inventory report', pathname === '/report')}
+        {navItem('/scope3-screening', 'Scope 3 screening', pathname === '/scope3-screening')}
         <RoleGate allow={['admin', 'data_entry']}>
           {navItem('/activity-data', 'Activity data', pathname === '/activity-data')}
           {navItem('/activity-data/import', 'Import data', pathname === '/activity-data/import')}

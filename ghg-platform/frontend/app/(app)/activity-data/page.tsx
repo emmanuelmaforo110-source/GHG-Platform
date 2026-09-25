@@ -4,7 +4,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { api, ApiError } from '@/lib/api';
 import {
-  ActivityDataRow, CreateActivityDataInput, DATA_QUALITY_LABELS, EmissionFactor, Facility, GhgCategory, ReportingPeriod,
+  ActivityDataRow, CreateActivityDataInput, DATA_QUALITY_LABELS, EmissionFactor, Facility, GhgCategory, METHOD_LABELS, ReportingPeriod,
 } from '@/lib/types';
 
 const UNIT_SUGGESTIONS: Record<string, string[]> = {
@@ -72,7 +72,8 @@ export default function ActivityDataPage() {
   const periodIsEditable = selectedPeriod?.status === 'draft';
   const categoryFactors = factors.filter((factor) => factor.categoryId === form.categoryId);
   const selectedFactor = factors.find((factor) => factor.id === form.emissionFactorId);
-  const estimatedKgCo2e = selectedFactor && typeof form.quantity === 'number' && form.quantity > 0
+  const isSupplierReported = form.calculationMethod === 'supplier_specific';
+  const estimatedKgCo2e = !isSupplierReported && selectedFactor && typeof form.quantity === 'number' && form.quantity > 0
     ? form.quantity * Number(selectedFactor.value)
     : null;
 
@@ -85,7 +86,7 @@ export default function ActivityDataPage() {
       nextFieldErrors.quantity = 'Enter a quantity greater than zero.';
     }
     if (!form.unit?.trim()) nextFieldErrors.unit = 'Enter the unit used by the source data.';
-    if (categoryFactors.length > 0 && !form.emissionFactorId) {
+    if (!isSupplierReported && categoryFactors.length > 0 && !form.emissionFactorId) {
       nextFieldErrors.emissionFactorId = 'Select the factor used for this calculation.';
     }
     setFieldErrors(nextFieldErrors);
@@ -99,6 +100,10 @@ export default function ActivityDataPage() {
     try {
       const payload = {
         ...form,
+        emissionFactorId: isSupplierReported ? undefined : form.emissionFactorId,
+        // Spend- vs activity-based follows the chosen factor; send an explicit method only for supplier data,
+        // or "activity_based" on an edit that switches away from supplier data.
+        calculationMethod: isSupplierReported ? 'supplier_specific' : editingId ? 'activity_based' : undefined,
         quantity: Number(form.quantity),
         // On an edit, an emptied instrument / quality score is sent as null so the server clears it.
         marketEmissionFactorId: form.marketEmissionFactorId || (editingId ? null : undefined),
@@ -141,6 +146,7 @@ export default function ActivityDataPage() {
       quantity: Number(row.quantity),
       unit: row.unit,
       emissionFactorId: row.emissionFactorId ?? undefined,
+      calculationMethod: row.calculationMethod === 'supplier_specific' ? 'supplier_specific' : undefined,
       // Only a real contractual instrument is shown; a grid-average proxy has the same id as the grid factor.
       marketEmissionFactorId:
         row.marketEmissionFactorId && row.marketEmissionFactorId !== row.emissionFactorId ? row.marketEmissionFactorId : undefined,
@@ -284,6 +290,31 @@ export default function ActivityDataPage() {
         </div>
 
         <div>
+          <label>How are the emissions calculated?</label>
+          <select
+            value={isSupplierReported ? 'supplier_specific' : 'factor'}
+            disabled={!periodIsEditable}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                calculationMethod: e.target.value === 'supplier_specific' ? 'supplier_specific' : undefined,
+                unit: e.target.value === 'supplier_specific' ? 't CO2e' : f.unit === 't CO2e' ? undefined : f.unit,
+                marketEmissionFactorId: undefined,
+              }))
+            }
+          >
+            <option value="factor">Quantity or spend × emission factor</option>
+            <option value="supplier_specific">{METHOD_LABELS.supplier_specific}</option>
+          </select>
+          <p className="mt-1 text-xs text-gray-400">
+            {isSupplierReported
+              ? 'Enter the emissions your supplier reported, in t CO2e or kg CO2e.'
+              : 'Choosing a factor "per USD" or "per TZS" makes the entry spend-based automatically.'}
+          </p>
+        </div>
+
+        {!isSupplierReported && (
+        <div>
           <label>Emission factor</label>
           <select
             value={form.emissionFactorId ?? ''}
@@ -304,6 +335,7 @@ export default function ActivityDataPage() {
             </p>
           )}
         </div>
+        )}
 
         {selectedCategory?.scope === 'scope_2' && (
           <div>
@@ -319,7 +351,7 @@ export default function ActivityDataPage() {
           </div>
         )}
 
-        {selectedCategory?.scope === 'scope_2' && (
+        {selectedCategory?.scope === 'scope_2' && !isSupplierReported && (
           <div>
             <label>Contractual instrument for the market-based result (optional)</label>
             <select

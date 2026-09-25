@@ -12,7 +12,7 @@ export const PERIOD = 'period-2026';
 export const user = { id: 'user-1', organizationId: ORG, role: 'admin' as const, restrictedFacilityId: null, email: 'a@b.c' };
 export const req = () => ({}) as any;
 
-export const CAT = { stationary: 1, mobile: 2, electricity: 4, fuelEnergy: 13, waste: 15, travel: 16, commuting: 17 };
+export const CAT = { stationary: 1, mobile: 2, electricity: 4, purchasedGoods: 11, fuelEnergy: 13, waste: 15, travel: 16, commuting: 17 };
 
 export function seed(periodStatus = 'draft') {
   const f = (id: string, categoryId: number, factorName: string, value: number, unit: string) => ({
@@ -30,6 +30,7 @@ export function seed(periodStatus = 'draft') {
       { id: CAT.stationary, scope: 'scope_1', scope3CategoryNo: null, name: 'Stationary Combustion' },
       { id: CAT.mobile, scope: 'scope_1', scope3CategoryNo: null, name: 'Mobile Combustion' },
       { id: CAT.electricity, scope: 'scope_2', scope3CategoryNo: null, name: 'Purchased Electricity' },
+      { id: CAT.purchasedGoods, scope: 'scope_3', scope3CategoryNo: 1, name: 'Category 1 — Purchased Goods & Services' },
       { id: CAT.fuelEnergy, scope: 'scope_3', scope3CategoryNo: 3, name: 'Category 3 — Fuel- and Energy-Related Activities' },
       { id: CAT.waste, scope: 'scope_3', scope3CategoryNo: 5, name: 'Category 5 — Waste Generated in Operations' },
       { id: CAT.travel, scope: 'scope_3', scope3CategoryNo: 6, name: 'Category 6 — Business Travel' },
@@ -50,7 +51,9 @@ export function seed(periodStatus = 'draft') {
       f('ef-taxi', CAT.travel, 'Ground transport — taxi/hired car', 0.17, 'kg CO2e / km'),
       f('ef-waste', CAT.waste, 'Mixed office waste to landfill', 0.45, 'kg CO2e / kg waste'),
     ],
-    reportingPeriod: [{ id: PERIOD, organizationId: ORG, year: 2026, status: periodStatus }],
+    reportingPeriod: [{ id: PERIOD, organizationId: ORG, year: 2026, status: periodStatus, gwpSet: 'AR6', isBaseYear: true, boundaryApproach: 'operational_control', staffFte: 12, recalculationThresholdPct: 5, submittedBy: null, approvedBy: null }],
+    organization: [{ id: ORG, name: 'Pemandu Associates (Demo)', country: 'Tanzania' }],
+    user: [{ id: 'user-1', organizationId: ORG, fullName: 'Demo Admin' }],
     facility: [{ id: FACILITY, organizationId: ORG, name: 'Dar es Salaam Office', isActive: true }],
   });
 }

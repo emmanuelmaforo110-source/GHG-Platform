@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, UseGuards, UseInterceptors } from '@nestjs/common';
+import { CreateReportingPeriodDto, Scope3ScreenDto, UpdateReportingPeriodDto } from './dto/reporting-period.dto';
 import { ReportingPeriodsService } from './reporting-periods.service';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -20,8 +21,38 @@ export class ReportingPeriodsController {
   @Post()
   @Roles('admin')
   @Audit({ action: 'create', entityType: 'reporting_periods' })
-  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: any) {
+  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateReportingPeriodDto) {
     return this.service.create(user, dto);
+  }
+
+  /** Change a draft period's settings (staff FTE, boundary, GWP set, recalculation threshold). */
+  @Patch(':id')
+  @Roles('admin')
+  @Audit({ action: 'update', entityType: 'reporting_periods' })
+  updateSettings(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateReportingPeriodDto,
+  ) {
+    return this.service.updateSettings(user, id, dto);
+  }
+
+  /** The 15 Scope 3 categories with this period's include/exclude decision and quantified totals. */
+  @Get(':id/scope3-screening')
+  @Roles('admin', 'data_entry', 'management', 'verifier')
+  scope3Screening(@CurrentUser() user: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.scope3Screening(user, id);
+  }
+
+  @Put(':id/scope3-screening')
+  @Roles('admin', 'data_entry')
+  @Audit({ action: 'update', entityType: 'scope3_relevance_screen' })
+  saveScope3Screen(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: Scope3ScreenDto,
+  ) {
+    return this.service.saveScope3Screen(user, id, dto);
   }
 
   @Patch(':id/submit')

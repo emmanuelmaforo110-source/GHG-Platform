@@ -19,6 +19,7 @@ export const IMPORT_COLUMNS = [
   'data_quality',
   'detail',
   'notes',
+  'method',
 ] as const;
 
 const MAX_ROWS = 1000;
@@ -62,9 +63,11 @@ export class ImportExportService {
   templateCsv(): string {
     return toCsv([
       [...IMPORT_COLUMNS],
-      ['Dar es Salaam Office', 'Stationary Combustion', 'Backup generator', 'Diesel', 1000, 'litres', '', '', 2, 'Fuel receipts Jan-Dec', ''],
-      ['Dar es Salaam Office', 'Purchased Electricity', 'Office electricity', '', 18000, 'kWh', 'Tanzania grid electricity', '', 1, 'TANESCO bills', ''],
-      ['Dar es Salaam Office', 'Category 6 — Business Travel', 'Hotel nights', '', 15, 'room-nights', 'Hotel stay', '', 3, '', ''],
+      ['Dar es Salaam Office', 'Stationary Combustion', 'Backup generator', 'Diesel', 1000, 'litres', '', '', 2, 'Fuel receipts Jan-Dec', '', ''],
+      ['Dar es Salaam Office', 'Purchased Electricity', 'Office electricity', '', 18000, 'kWh', 'Tanzania grid electricity', '', 1, 'TANESCO bills', '', ''],
+      ['Dar es Salaam Office', 'Category 6 — Business Travel', 'Hotel nights', '', 15, 'room-nights', 'Hotel stay', '', 3, '', '', ''],
+      // Supplier-reported emissions: quantity in kg or t CO2e, method = supplier
+      ['Dar es Salaam Office', 'Category 1 — Purchased Goods & Services', 'Printing supplier (reported)', '', 0.4, 't CO2e', '', '', 2, 'Supplier carbon statement', '', 'supplier'],
     ]);
   }
 
@@ -150,6 +153,12 @@ export class ImportExportService {
         if (qualityText && !(Number.isInteger(dataQualityScore) && dataQualityScore! >= 1 && dataQualityScore! <= 5)) {
           fail('Data quality must be a whole number from 1 (best) to 5 (weakest), or left blank.');
         }
+        const methodText = col(row, 'method').toLowerCase();
+        let calculationMethod: 'supplier_specific' | undefined;
+        if (methodText.startsWith('supplier')) calculationMethod = 'supplier_specific';
+        else if (methodText && !['activity', 'activity_based', 'spend', 'spend_based', 'auto'].includes(methodText)) {
+          fail('Method must be blank, "activity", "spend" or "supplier".');
+        }
         if (result.errors.length) continue;
 
         const factorsInCategory = await this.prisma.emissionFactor.findMany({
@@ -184,12 +193,13 @@ export class ImportExportService {
           emissionFactorId,
           marketEmissionFactorId,
           dataQualityScore,
+          calculationMethod,
           detail: col(row, 'detail') || undefined,
           notes: col(row, 'notes') || undefined,
         };
 
         const prepared = await this.activityData.prepare(user, period, dto);
-        result.emissionFactor = prepared.factor.factorName;
+        result.emissionFactor = prepared.factor?.factorName ?? 'Supplier-reported emissions';
         result.emissionsTco2e = round(prepared.emissionsKg / 1000);
         result.marketEmissionsTco2e = prepared.market ? round(prepared.market.emissionsKg / 1000) : null;
         result.ok = true;
@@ -241,7 +251,8 @@ export class ImportExportService {
         'row_id', 'facility', 'scope', 'category', 'source_name', 'detail', 'fuel_or_material_type', 'quantity', 'unit',
         'emission_factor_value', 'emission_factor_unit', 'emission_factor_source', 'emissions_kgco2e', 'emissions_tco2e',
         'market_factor_value', 'market_factor_source', 'market_emissions_tco2e', 'market_basis_note',
-        'data_quality', 'automatic_from_row_id', 'notes', 'entered_at', 'updated_at',
+        'data_quality', 'calculation_method', 'co2_kg', 'ch4_kg', 'n2o_kg', 'gwp_set',
+        'automatic_from_row_id', 'notes', 'entered_at', 'updated_at',
       ],
       ...rows.map((r) => [
         r.id, r.facility.name, scopeLabel(r.category.scope), r.category.name, r.sourceName, r.detail, r.fuelOrMaterialType,
@@ -249,7 +260,9 @@ export class ImportExportService {
         Number(r.emissionsKgco2e), Number(r.emissionsTco2e),
         r.marketFactorValueUsed === null ? null : Number(r.marketFactorValueUsed), r.marketFactorSourceUsed,
         r.marketEmissionsTco2e === null ? null : Number(r.marketEmissionsTco2e), r.marketBasisNote,
-        r.dataQualityScore, r.sourceActivityDataId, r.notes,
+        r.dataQualityScore, r.calculationMethod,
+        r.co2Kg === null ? null : Number(r.co2Kg), r.ch4Kg === null ? null : Number(r.ch4Kg), r.n2oKg === null ? null : Number(r.n2oKg),
+        r.gwpSetUsed, r.sourceActivityDataId, r.notes,
         new Date(r.enteredAt).toISOString(), new Date(r.updatedAt).toISOString(),
       ]),
     ]);

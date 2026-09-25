@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { EmissionFactor, Prisma } from '@prisma/client';
 import { toFactorUnit } from './units';
+import { co2eFromGases, GasSplit, GwpSetName } from './gwp';
 
 /**
  * Implements Section 3 of GHG_Platform_Architecture.md:
@@ -27,15 +28,29 @@ export class CalculationEngineService {
 
   /**
    * Converts the activity quantity to the factor's unit, then applies the factor.
+   * When the factor is split by gas (CO2, CH4, N2O per unit), the mass of each gas is calculated
+   * and CO2e is worked out with the chosen GWP set (AR5 or AR6); otherwise the factor's CO2e value
+   * is used as published and `gases` is null.
    * Throws BadRequestException if the units are incompatible.
    */
   computeWithUnits(
     quantity: Prisma.Decimal | number,
     activityUnit: string,
-    factor: Pick<EmissionFactor, 'value' | 'unit'>,
-  ): { convertedQuantity: number; emissionsKg: number } {
+    factor: Pick<EmissionFactor, 'value' | 'unit'> &
+      Partial<Pick<EmissionFactor, 'co2PerUnit' | 'ch4PerUnit' | 'n2oPerUnit'>>,
+    gwpSet: GwpSetName = 'AR6',
+  ): { convertedQuantity: number; emissionsKg: number; gases: GasSplit | null } {
     const convertedQuantity = toFactorUnit(Number(quantity), activityUnit, factor.unit);
-    return { convertedQuantity, emissionsKg: this.computeEmissionsKg(convertedQuantity, factor.value) };
+    const split =
+      factor.co2PerUnit != null && factor.ch4PerUnit != null && factor.n2oPerUnit != null
+        ? {
+            co2Kg: convertedQuantity * Number(factor.co2PerUnit),
+            ch4Kg: convertedQuantity * Number(factor.ch4PerUnit),
+            n2oKg: convertedQuantity * Number(factor.n2oPerUnit),
+          }
+        : null;
+    const emissionsKg = split ? co2eFromGases(split, gwpSet) : this.computeEmissionsKg(convertedQuantity, factor.value);
+    return { convertedQuantity, emissionsKg, gases: split };
   }
 
   /**
@@ -143,6 +158,7 @@ export class CalculationEngineService {
     unit: string;
     emissionFactorId?: string | null;
     dataQualityScore?: number | null;
+    calculationMethod?: string | null;
     enteredBy: string;
   }) {
     const sourceCategory = await this.prisma.ghgCategory.findUnique({ where: { id: sourceRow.categoryId } });
@@ -157,9 +173,12 @@ export class CalculationEngineService {
     const existingId = await this.findDerivedRow(sourceRow.id, scope3FuelEnergyCategory.id);
 
     let derived: Omit<Prisma.ActivityDataUncheckedCreateInput, 'enteredBy'> | null = null;
+    // Upstream rows are only derived from physical quantities (litres, kWh), not from spend or
+    // supplier-reported emissions.
+    const isPhysical = (sourceRow.calculationMethod ?? 'activity_based') === 'activity_based';
 
     // --- Case A: Scope 1 fuel combustion row -> WTT derived row ---
-    if (sourceCategory.scope === 'scope_1' && sourceRow.fuelOrMaterialType) {
+    if (isPhysical && sourceCategory.scope === 'scope_1' && sourceRow.fuelOrMaterialType) {
       const wttFactor = await this.resolveFactor({
         organizationId: sourceRow.organizationId,
         categoryId: scope3FuelEnergyCategory.id,
@@ -177,7 +196,8 @@ export class CalculationEngineService {
         .catch(() => null); // e.g. LPG has no seeded WTT factor yet — skip rather than fail the parent save
 
       if (wttFactor) {
-        const { emissionsKg } = this.computeWithUnits(sourceRow.quantity, sourceRow.unit, wttFactor);
+        const gwpSet = (period.gwpSet ?? 'AR6') as GwpSetName;
+        const { emissionsKg, gases } = this.computeWithUnits(sourceRow.quantity, sourceRow.unit, wttFactor, gwpSet);
         derived = {
           organizationId: sourceRow.organizationId,
           facilityId: sourceRow.facilityId,
@@ -192,6 +212,10 @@ export class CalculationEngineService {
           emissionFactorValueUsed: wttFactor.value,
           emissionFactorUnitUsed: wttFactor.unit,
           emissionFactorSourceUsed: wttFactor.source,
+          co2Kg: gases?.co2Kg ?? null,
+          ch4Kg: gases?.ch4Kg ?? null,
+          n2oKg: gases?.n2oKg ?? null,
+          gwpSetUsed: gwpSet,
           sourceActivityDataId: sourceRow.id,
           dataQualityScore: sourceRow.dataQualityScore ?? null, // inherits the quality of its source entry
           derivationNote:
@@ -203,7 +227,7 @@ export class CalculationEngineService {
     }
 
     // --- Case B: Scope 2 electricity row -> T&D loss derived row ---
-    if (sourceCategory.scope === 'scope_2') {
+    if (isPhysical && sourceCategory.scope === 'scope_2') {
       const tdLossFactor = await this.resolveFactor({
         organizationId: sourceRow.organizationId,
         categoryId: scope3FuelEnergyCategory.id,
@@ -218,7 +242,8 @@ export class CalculationEngineService {
       if (tdLossFactor && gridFactor) {
         const kwhDelivered = toFactorUnit(Number(sourceRow.quantity), sourceRow.unit, gridFactor.unit);
         const lostKwh = kwhDelivered * Number(tdLossFactor.value);
-        const emissionsKg = this.computeEmissionsKg(lostKwh, gridFactor.value);
+        const gwpSet = (period.gwpSet ?? 'AR6') as GwpSetName;
+        const { emissionsKg, gases } = this.computeWithUnits(lostKwh, gridFactor.unit.split('/').pop()!.trim(), gridFactor, gwpSet);
         derived = {
           organizationId: sourceRow.organizationId,
           facilityId: sourceRow.facilityId,
@@ -232,6 +257,10 @@ export class CalculationEngineService {
           emissionFactorValueUsed: gridFactor.value,
           emissionFactorUnitUsed: gridFactor.unit,
           emissionFactorSourceUsed: gridFactor.source,
+          co2Kg: gases?.co2Kg ?? null,
+          ch4Kg: gases?.ch4Kg ?? null,
+          n2oKg: gases?.n2oKg ?? null,
+          gwpSetUsed: gwpSet,
           sourceActivityDataId: sourceRow.id,
           dataQualityScore: sourceRow.dataQualityScore ?? null, // inherits the quality of its source entry
           derivationNote:

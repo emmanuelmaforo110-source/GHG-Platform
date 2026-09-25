@@ -42,6 +42,19 @@ enum BoundaryApproach {
   equity_share
 }
 
+// IPCC Assessment Report whose 100-year Global Warming Potentials convert CH4 and N2O into CO2e.
+enum GwpSet {
+  AR5
+  AR6
+}
+
+// How an entry's emissions were worked out (GHG Protocol Scope 3 Standard, calculation methods).
+enum CalculationMethod {
+  activity_based    // physical quantity x emission factor (litres, kWh, km, kg ...)
+  spend_based       // money spent x emission factor per currency unit (e.g. kg CO2e / USD)
+  supplier_specific // emissions reported by the supplier, entered directly (kg or t CO2e)
+}
+
 enum ReportingStatus {
   draft
   submitted
@@ -149,6 +162,12 @@ model EmissionFactor {
   factorName     String   @map("factor_name")
   value          Decimal  @db.Decimal(14, 6)
   unit           String
+  // Optional split by gas, in kg of each gas per unit (same unit as `value`). When all three are
+  // present, CO2e is calculated from the gases with the reporting period's GWP set (AR5 or AR6)
+  // and results are reported per gas; otherwise `value` (already in CO2e) is used as published.
+  co2PerUnit     Decimal? @map("co2_per_unit") @db.Decimal(18, 9)
+  ch4PerUnit     Decimal? @map("ch4_per_unit") @db.Decimal(18, 9)
+  n2oPerUnit     Decimal? @map("n2o_per_unit") @db.Decimal(18, 9)
   validYear      Int      @map("valid_year")
   source         String
   notes          String?
@@ -176,6 +195,7 @@ model ReportingPeriod {
   boundaryApproach            BoundaryApproach  @default(operational_control) @map("boundary_approach")
   isBaseYear                  Boolean           @default(false) @map("is_base_year")
   recalculationThresholdPct   Decimal           @default(5.00) @map("recalculation_threshold_pct") @db.Decimal(5, 2)
+  gwpSet                      GwpSet            @default(AR6) @map("gwp_set")
   staffFte                    Decimal?          @map("staff_fte") @db.Decimal(6, 1)
   status                      ReportingStatus   @default(draft)
   submittedBy                 String?           @map("submitted_by") @db.Uuid
@@ -233,6 +253,13 @@ model ActivityData {
 
   // Data quality score, 1 = best (metered / supplier-verified) to 5 = weakest (rough estimate).
   dataQualityScore             Int?     @map("data_quality_score")
+
+  calculationMethod            CalculationMethod @default(activity_based) @map("calculation_method")
+  // Mass of each gas (kg), when the emission factor is split by gas. Null = factor given in CO2e only.
+  co2Kg                        Decimal? @map("co2_kg") @db.Decimal(18, 6)
+  ch4Kg                        Decimal? @map("ch4_kg") @db.Decimal(18, 6)
+  n2oKg                        Decimal? @map("n2o_kg") @db.Decimal(18, 6)
+  gwpSetUsed                   GwpSet?  @map("gwp_set_used")
 
   notes                         String?
   status                         ReportingStatus @default(draft)

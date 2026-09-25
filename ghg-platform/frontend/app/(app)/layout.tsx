@@ -19,9 +19,9 @@ function Gate({ children }: { children: ReactNode }) {
   if (!user) return null; // brief flash before the redirect above fires
 
   return (
-    <div className="flex min-h-screen flex-col md:h-screen md:flex-row">
+    <div className="flex min-h-screen flex-col md:h-screen md:flex-row print:block print:h-auto">
       <Sidebar />
-      <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 md:p-8">{children}</main>
+      <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 print:overflow-visible print:p-0">{children}</main>
     </div>
   );
 }

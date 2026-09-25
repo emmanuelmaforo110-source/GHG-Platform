@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { GWP } from '../activity-data/gwp';
 
 @Injectable()
 export class DashboardService {
@@ -108,21 +109,22 @@ export class DashboardService {
       scope3Tco2e: number;
       totalTco2e: number;
     }[] = [];
+    // One query for all entries of the organization, rolled up by period and scope.
+    const [rows, categories] = await Promise.all([
+      this.prisma.activityData.findMany({
+        where: { organizationId: user.organizationId },
+        select: { reportingPeriodId: true, categoryId: true, emissionsTco2e: true },
+      }),
+      this.prisma.ghgCategory.findMany(),
+    ]);
+    const catScope = new Map(categories.map((c) => [c.id, c.scope]));
+
     for (const period of periods) {
-      const agg = await this.prisma.activityData.groupBy({
-        by: ['categoryId'],
-        where: { reportingPeriodId: period.id },
-        _sum: { emissionsTco2e: true },
-      });
-
-      // Roll category-level sums up to scope-level using the categories reference table.
-      const categories = await this.prisma.ghgCategory.findMany();
-      const catScope = new Map(categories.map((c) => [c.id, c.scope]));
-
       const byScope = { scope_1: 0, scope_2: 0, scope_3: 0 } as Record<string, number>;
-      for (const a of agg) {
-        const scope = catScope.get(a.categoryId);
-        if (scope) byScope[scope] += Number(a._sum.emissionsTco2e ?? 0);
+      for (const r of rows) {
+        if (r.reportingPeriodId !== period.id) continue;
+        const scope = catScope.get(r.categoryId);
+        if (scope) byScope[scope] += Number(r.emissionsTco2e);
       }
       const total = byScope.scope_1 + byScope.scope_2 + byScope.scope_3;
 
@@ -163,6 +165,122 @@ export class DashboardService {
       isQuantified: quantifiedCategoryIds.has(s.categoryId),
       relevanceAssessment: s.relevanceAssessment,
     }));
+  }
+
+  /**
+   * Everything needed for a printable GHG inventory report (GHG Protocol / ISO 14064-1 style):
+   * organisation and boundary, method (GWP set, Scope 2 methods), totals by scope, category, gas and
+   * calculation method, Scope 3 screening of all 15 categories, data quality, emission factors used,
+   * approval trail and year-on-year history.
+   */
+  async report(user: AuthenticatedUser, reportingPeriodId: string) {
+    const summary = await this.summary(user, reportingPeriodId);
+    const period = await this.prisma.reportingPeriod.findFirst({
+      where: { id: reportingPeriodId, organizationId: user.organizationId },
+    });
+    if (!period) throw new NotFoundException('Reporting period not found.');
+
+    const [organization, facilities, rows, categories, screens, history, people] = await Promise.all([
+      this.prisma.organization.findFirst({ where: { id: user.organizationId } }),
+      this.prisma.facility.findMany({ where: { organizationId: user.organizationId }, orderBy: { name: 'asc' } }),
+      this.prisma.activityData.findMany({
+        where: { reportingPeriodId, organizationId: user.organizationId },
+        include: { category: true, emissionFactor: true },
+      }),
+      this.prisma.ghgCategory.findMany({ orderBy: [{ scope: 'asc' }, { scope3CategoryNo: 'asc' }, { name: 'asc' }] }),
+      this.prisma.scope3RelevanceScreen.findMany({ where: { reportingPeriodId, organizationId: user.organizationId } }),
+      this.periodOverPeriod(user),
+      this.prisma.user.findMany({
+        where: { organizationId: user.organizationId, id: { in: [period.submittedBy, period.approvedBy].filter((x): x is string => !!x) } },
+        select: { id: true, fullName: true },
+      }),
+    ]);
+    const nameOf = (id: string | null) => people.find((p) => p.id === id)?.fullName ?? null;
+
+    // Totals by category
+    const byCategory = categories
+      .map((c) => {
+        const inCat = rows.filter((r) => r.categoryId === c.id);
+        return {
+          scope: c.scope,
+          category: c.name,
+          entries: inCat.length,
+          tco2e: round(inCat.reduce((s, r) => s + Number(r.emissionsTco2e), 0), 6),
+        };
+      })
+      .filter((c) => c.entries > 0);
+
+    // Totals by gas (only entries whose emission factor is split by gas)
+    const split = rows.filter((r) => r.co2Kg !== null && r.co2Kg !== undefined);
+    const total = rows.reduce((s, r) => s + Number(r.emissionsTco2e), 0);
+    const splitT = split.reduce((s, r) => s + Number(r.emissionsTco2e), 0);
+    const byGas = {
+      co2Tonnes: round(split.reduce((s, r) => s + Number(r.co2Kg), 0) / 1000, 6),
+      ch4Tonnes: round(split.reduce((s, r) => s + Number(r.ch4Kg ?? 0), 0) / 1000, 6),
+      n2oTonnes: round(split.reduce((s, r) => s + Number(r.n2oKg ?? 0), 0) / 1000, 6),
+      shareOfEmissionsSplitByGas: total > 0 ? round(splitT / total, 4) : null,
+    };
+
+    // Totals by calculation method
+    const byMethod = (['activity_based', 'spend_based', 'supplier_specific'] as const).map((m) => ({
+      method: m,
+      tco2e: round(rows.filter((r) => (r.calculationMethod ?? 'activity_based') === m).reduce((s, r) => s + Number(r.emissionsTco2e), 0), 6),
+    }));
+
+    // Scope 3 screening across all 15 categories
+    const scope3Screening = categories
+      .filter((c) => c.scope === 'scope_3')
+      .map((c) => {
+        const screen = screens.find((x) => x.categoryId === c.id);
+        const t = rows.filter((r) => r.categoryId === c.id).reduce((s, r) => s + Number(r.emissionsTco2e), 0);
+        const status = t > 0 ? 'quantified' : screen ? (screen.isIncluded ? 'included_not_quantified' : 'excluded') : 'not_screened';
+        return { categoryNo: c.scope3CategoryNo, category: c.name, status, tco2e: round(t, 6), reason: screen?.relevanceAssessment ?? null };
+      });
+
+    // Emission factors used (one line per distinct factor)
+    const factorMap = new Map<string, { name: string; value: number; unit: string; source: string; year: number | null; entries: number }>();
+    for (const r of rows) {
+      const key = r.emissionFactorId ?? `supplier:${r.emissionFactorSourceUsed}`;
+      const f = factorMap.get(key);
+      if (f) f.entries++;
+      else
+        factorMap.set(key, {
+          name: r.emissionFactor?.factorName ?? 'Supplier-reported emissions',
+          value: Number(r.emissionFactorValueUsed),
+          unit: r.emissionFactorUnitUsed,
+          source: r.emissionFactorSourceUsed,
+          year: r.emissionFactor?.validYear ?? null,
+          entries: 1,
+        });
+    }
+
+    const gwpSet = period.gwpSet ?? 'AR6';
+    return {
+      generatedAt: new Date().toISOString(),
+      organization: { name: organization?.name ?? '', country: organization?.country ?? null },
+      facilities: facilities.map((f) => ({ name: f.name, country: f.country, isActive: f.isActive })),
+      period: {
+        year: period.year,
+        status: period.status,
+        isBaseYear: period.isBaseYear,
+        boundaryApproach: period.boundaryApproach,
+        gwpSet,
+        staffFte: period.staffFte === null ? null : Number(period.staffFte),
+        recalculationThresholdPct: Number(period.recalculationThresholdPct),
+        submittedBy: nameOf(period.submittedBy),
+        submittedAt: period.submittedAt,
+        approvedBy: nameOf(period.approvedBy),
+        approvedAt: period.approvedAt,
+      },
+      gwpValues: GWP[gwpSet as keyof typeof GWP],
+      summary,
+      byCategory,
+      byGas,
+      byMethod,
+      scope3Screening,
+      factorsUsed: [...factorMap.values()].sort((a, b) => b.entries - a.entries),
+      history,
+    };
   }
 }
 

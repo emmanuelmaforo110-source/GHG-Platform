@@ -5,17 +5,26 @@ import { CalculationEngineService } from './calculation-engine.service';
 import { CreateActivityDataDto } from './dto/create-activity-data.dto';
 import { UpdateActivityDataDto } from './dto/update-activity-data.dto';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { convertQuantity, factorDenominator, isCurrencyUnit } from './units';
+import { GasSplit, GwpSetName } from './gwp';
+
+export type CalculationMethodName = 'activity_based' | 'spend_based' | 'supplier_specific';
+export const SUPPLIER_SPECIFIC_SOURCE = 'Supplier-reported emissions (supplier-specific method)';
 
 export const GRID_PROXY_NOTE = 'No contractual instrument recorded; grid average used as a proxy for the residual mix.';
 
 /** The calculated part of an entry, before it is saved. Shared by create, update and CSV import. */
 export interface PreparedCalculation {
   category: GhgCategory;
-  factor: EmissionFactor;
+  /** Null for supplier-specific entries, where the emissions are entered directly. */
+  factor: EmissionFactor | null;
+  method: CalculationMethodName;
+  gwpSet: GwpSetName;
+  gases: GasSplit | null;
   convertedQuantity: number;
   emissionsKg: number;
   market: {
-    factor: EmissionFactor;
+    factor: EmissionFactor | null;
     emissionsKg: number;
     note: string;
   } | null;
@@ -106,8 +115,9 @@ export class ActivityDataService {
    */
   async prepare(
     user: AuthenticatedUser,
-    period: Pick<ReportingPeriod, 'year'>,
+    period: Pick<ReportingPeriod, 'year'> & Partial<Pick<ReportingPeriod, 'gwpSet'>>,
     input: {
+      calculationMethod?: CalculationMethodName | null;
       categoryId: number;
       fuelOrMaterialType?: string | null;
       emissionFactorId?: string | null;
@@ -118,6 +128,33 @@ export class ActivityDataService {
   ): Promise<PreparedCalculation> {
     const category = await this.prisma.ghgCategory.findUnique({ where: { id: input.categoryId } });
     if (!category) throw new NotFoundException('Category not found.');
+    const gwpSet = (period.gwpSet ?? 'AR6') as GwpSetName;
+
+    // Supplier-specific: the supplier's reported emissions are entered directly, in kg or t CO2e.
+    if (input.calculationMethod === 'supplier_specific') {
+      if (input.marketEmissionFactorId) {
+        throw new BadRequestException('A market-based emission factor cannot be combined with supplier-reported emissions.');
+      }
+      let emissionsKg: number;
+      try {
+        emissionsKg = convertQuantity(input.quantity, input.unit, 'kg CO2e');
+      } catch {
+        throw new BadRequestException('For supplier-reported emissions, enter the quantity in "kg CO2e" or "t CO2e".');
+      }
+      return {
+        category,
+        factor: null,
+        method: 'supplier_specific',
+        gwpSet,
+        gases: null,
+        convertedQuantity: emissionsKg,
+        emissionsKg,
+        market:
+          category.scope === 'scope_2'
+            ? { factor: null, emissionsKg, note: 'Supplier-reported emissions used for both methods.' }
+            : null,
+      };
+    }
 
     const factor = input.emissionFactorId
       ? await this.getExplicitFactor(user, input.emissionFactorId, input.categoryId, 'Emission factor')
@@ -128,8 +165,17 @@ export class ActivityDataService {
           year: period.year,
         });
 
+    // A factor "per USD", "per TZS" etc. makes this a spend-based entry.
+    const isSpendFactor = isCurrencyUnit(factorDenominator(factor.unit));
+    if (input.calculationMethod === 'spend_based' && !isSpendFactor) {
+      throw new BadRequestException(
+        'Spend-based entries need a spend-based emission factor (per currency unit, e.g. "kg CO2e / USD").',
+      );
+    }
+    const method: CalculationMethodName = isSpendFactor ? 'spend_based' : 'activity_based';
+
     // Converts e.g. MWh -> kWh or gallons -> litres; rejects incompatible units.
-    const { convertedQuantity, emissionsKg } = this.calc.computeWithUnits(input.quantity, input.unit, factor);
+    const { convertedQuantity, emissionsKg, gases } = this.calc.computeWithUnits(input.quantity, input.unit, factor, gwpSet);
 
     let market: PreparedCalculation['market'] = null;
     if (category.scope === 'scope_2') {
@@ -138,29 +184,34 @@ export class ActivityDataService {
         : factor;
       market = {
         factor: marketFactor,
-        emissionsKg: this.calc.computeWithUnits(input.quantity, input.unit, marketFactor).emissionsKg,
+        emissionsKg: this.calc.computeWithUnits(input.quantity, input.unit, marketFactor, gwpSet).emissionsKg,
         note: input.marketEmissionFactorId ? `Contractual instrument: ${marketFactor.factorName}` : GRID_PROXY_NOTE,
       };
     } else if (input.marketEmissionFactorId) {
       throw new BadRequestException('A market-based emission factor can only be used for Scope 2 (purchased energy) entries.');
     }
 
-    return { category, factor, convertedQuantity, emissionsKg, market };
+    return { category, factor, method, gwpSet, gases, convertedQuantity, emissionsKg, market };
   }
 
   /** Maps a prepared calculation onto the activity_data columns. */
   private calculatedColumns(p: PreparedCalculation) {
     return {
-      emissionFactorId: p.factor.id,
-      emissionFactorValueUsed: p.factor.value,
-      emissionFactorUnitUsed: p.factor.unit,
-      emissionFactorSourceUsed: p.factor.source,
+      calculationMethod: p.method,
+      emissionFactorId: p.factor?.id ?? null,
+      emissionFactorValueUsed: p.factor ? p.factor.value : 1,
+      emissionFactorUnitUsed: p.factor ? p.factor.unit : 'kg CO2e / kg CO2e',
+      emissionFactorSourceUsed: p.factor ? p.factor.source : SUPPLIER_SPECIFIC_SOURCE,
       emissionsKgco2e: p.emissionsKg,
       emissionsTco2e: p.emissionsKg / 1000,
-      marketEmissionFactorId: p.market?.factor.id ?? null,
-      marketFactorValueUsed: p.market?.factor.value ?? null,
-      marketFactorUnitUsed: p.market?.factor.unit ?? null,
-      marketFactorSourceUsed: p.market?.factor.source ?? null,
+      co2Kg: p.gases?.co2Kg ?? null,
+      ch4Kg: p.gases?.ch4Kg ?? null,
+      n2oKg: p.gases?.n2oKg ?? null,
+      gwpSetUsed: p.gwpSet,
+      marketEmissionFactorId: p.market?.factor?.id ?? null,
+      marketFactorValueUsed: p.market ? (p.market.factor ? p.market.factor.value : 1) : null,
+      marketFactorUnitUsed: p.market ? (p.market.factor ? p.market.factor.unit : 'kg CO2e / kg CO2e') : null,
+      marketFactorSourceUsed: p.market ? (p.market.factor ? p.market.factor.source : SUPPLIER_SPECIFIC_SOURCE) : null,
       marketEmissionsKgco2e: p.market ? p.market.emissionsKg : null,
       marketEmissionsTco2e: p.market ? p.market.emissionsKg / 1000 : null,
       marketBasisNote: p.market?.note ?? null,
@@ -240,7 +291,9 @@ export class ActivityDataService {
       merged.categoryId !== existing.categoryId ||
       merged.fuelOrMaterialType !== existing.fuelOrMaterialType ||
       targetPeriod.year !== period.year;
-    const factorId = dto.emissionFactorId ?? (factorInputsChanged ? null : existing.emissionFactorId);
+    const factorId =
+      dto.emissionFactorId ??
+      (factorInputsChanged || dto.calculationMethod === 'supplier_specific' ? null : existing.emissionFactorId);
 
     // A previously recorded contractual instrument is kept unless the caller changes or clears it (null).
     const hadInstrument = !!existing.marketEmissionFactorId && existing.marketEmissionFactorId !== existing.emissionFactorId;
@@ -251,7 +304,11 @@ export class ActivityDataService {
           ? existing.marketEmissionFactorId
           : null;
 
+    // Spend- vs activity-based follows the chosen factor; only "supplier-specific" is kept explicitly.
+    const method: CalculationMethodName | undefined =
+      dto.calculationMethod ?? (existing.calculationMethod === 'supplier_specific' ? 'supplier_specific' : undefined);
     const prepared = await this.prepare(user, targetPeriod, {
+      calculationMethod: method,
       categoryId: merged.categoryId,
       fuelOrMaterialType: merged.fuelOrMaterialType,
       emissionFactorId: factorId,

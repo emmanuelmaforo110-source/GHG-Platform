@@ -7,6 +7,6 @@ import { ImportExportService } from './import-export.service';
 @Module({
   controllers: [ActivityDataController],
   providers: [ActivityDataService, CalculationEngineService, ImportExportService],
-  exports: [CalculationEngineService],
+  exports: [CalculationEngineService, ActivityDataService],
 })
 export class ActivityDataModule {}

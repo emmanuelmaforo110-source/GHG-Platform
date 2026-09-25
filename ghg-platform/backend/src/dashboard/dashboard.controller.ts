@@ -15,6 +15,12 @@ export class DashboardController {
     return this.service.summary(user, reportingPeriodId);
   }
 
+  /** Data for the printable GHG inventory report. */
+  @Get('report/:reportingPeriodId')
+  report(@CurrentUser() user: AuthenticatedUser, @Param('reportingPeriodId') reportingPeriodId: string) {
+    return this.service.report(user, reportingPeriodId);
+  }
+
   @Get('period-over-period')
   periodOverPeriod(@CurrentUser() user: AuthenticatedUser) {
     return this.service.periodOverPeriod(user);

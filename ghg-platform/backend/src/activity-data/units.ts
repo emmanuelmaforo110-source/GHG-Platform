@@ -10,7 +10,7 @@ import { BadRequestException } from '@nestjs/common';
  * are rejected with a clear error instead of producing a wrong number.
  */
 
-type Dimension = 'volume' | 'energy' | 'mass' | 'distance' | 'passenger_distance' | 'room_night';
+type Dimension = 'volume' | 'energy' | 'mass' | 'distance' | 'passenger_distance' | 'room_night' | 'co2e_mass';
 
 interface UnitDef {
   dimension: Dimension;
@@ -67,6 +67,13 @@ const UNITS: Record<string, UnitDef> = {
   'passenger km': { dimension: 'passenger_distance', toBase: 1 },
   pkm: { dimension: 'passenger_distance', toBase: 1 },
   'passenger-mile': { dimension: 'passenger_distance', toBase: 1.609344 },
+
+  // Emissions reported directly (supplier-specific method)
+  'kg co2e': { dimension: 'co2e_mass', toBase: 1 },
+  kgco2e: { dimension: 'co2e_mass', toBase: 1 },
+  't co2e': { dimension: 'co2e_mass', toBase: 1000 },
+  tco2e: { dimension: 'co2e_mass', toBase: 1000 },
+  'tonne co2e': { dimension: 'co2e_mass', toBase: 1000 },
 
   // Hotel stays
   'room-night': { dimension: 'room_night', toBase: 1 },
@@ -139,3 +146,13 @@ export function toFactorUnit(quantity: number, activityUnit: string, factorUnit:
   if (!denom) return quantity;
   return convertQuantity(quantity, activityUnit, denom);
 }
+
+/**
+ * True when a factor unit is "per currency unit", e.g. "kg CO2e / USD" or "kg CO2e / TZS" —
+ * i.e. a spend-based factor. Currency amounts are never converted between currencies here:
+ * enter the spend in the factor's own currency.
+ */
+export function isCurrencyUnit(unit: string | null | undefined): boolean {
+  return !!unit && /^[A-Z]{3}$/.test(unit.trim());
+}
+

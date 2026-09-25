@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Post, Query, UseGuards, UseInterceptors } from '@nestjs/common';
 import { EmissionFactorsService } from './emission-factors.service';
+import { EmissionFactorDto } from './dto/emission-factor.dto';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -26,7 +27,7 @@ export class EmissionFactorsController {
   @Post()
   @Roles('admin')
   @Audit({ action: 'update', entityType: 'emission_factors' })
-  createOverride(@CurrentUser() user: AuthenticatedUser, @Body() dto: any) {
+  createOverride(@CurrentUser() user: AuthenticatedUser, @Body() dto: EmissionFactorDto) {
     return this.service.createOverride(user, dto);
   }
 }
