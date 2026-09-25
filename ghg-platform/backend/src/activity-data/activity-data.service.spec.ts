@@ -14,7 +14,7 @@ const PERIOD = 'period-2026';
 const user = { id: 'user-1', organizationId: ORG, role: 'admin' as const, restrictedFacilityId: null, email: 'a@b.c' };
 const req = () => ({}) as any;
 
-const CAT = { stationary: 1, mobile: 2, electricity: 4, fuelEnergy: 13, commuting: 17 };
+const CAT = { stationary: 1, mobile: 2, electricity: 4, fuelEnergy: 13, waste: 15, travel: 16, commuting: 17 };
 
 function seed(periodStatus = 'draft') {
   const f = (id: string, categoryId: number, factorName: string, value: number, unit: string) => ({
@@ -33,6 +33,8 @@ function seed(periodStatus = 'draft') {
       { id: CAT.mobile, scope: 'scope_1', scope3CategoryNo: null, name: 'Mobile Combustion' },
       { id: CAT.electricity, scope: 'scope_2', scope3CategoryNo: null, name: 'Purchased Electricity' },
       { id: CAT.fuelEnergy, scope: 'scope_3', scope3CategoryNo: 3, name: 'Category 3 — Fuel- and Energy-Related Activities' },
+      { id: CAT.waste, scope: 'scope_3', scope3CategoryNo: 5, name: 'Category 5 — Waste Generated in Operations' },
+      { id: CAT.travel, scope: 'scope_3', scope3CategoryNo: 6, name: 'Category 6 — Business Travel' },
       { id: CAT.commuting, scope: 'scope_3', scope3CategoryNo: 7, name: 'Category 7 — Employee Commuting' },
     ],
     emissionFactor: [
@@ -44,6 +46,11 @@ function seed(periodStatus = 'draft') {
       f('ef-wtt-petrol', CAT.fuelEnergy, 'Well-to-tank (WTT) — petrol', 0.59, 'kg CO2e / litre'),
       f('ef-td', CAT.fuelEnergy, 'Tanzania grid — T&D loss rate', 0.17, '% (as decimal) of kWh delivered'),
       f('ef-commute', CAT.commuting, 'Employee commuting — average car', 0.17, 'kg CO2e / km'),
+      f('ef-air-short', CAT.travel, 'Air travel — short-haul (avg, econ.)', 0.15, 'kg CO2e / passenger-km'),
+      f('ef-air-long', CAT.travel, 'Air travel — long-haul (avg, econ.)', 0.19, 'kg CO2e / passenger-km'),
+      f('ef-hotel', CAT.travel, 'Hotel stay', 20, 'kg CO2e / room-night'),
+      f('ef-taxi', CAT.travel, 'Ground transport — taxi/hired car', 0.17, 'kg CO2e / km'),
+      f('ef-waste', CAT.waste, 'Mixed office waste to landfill', 0.45, 'kg CO2e / kg waste'),
     ],
     reportingPeriod: [{ id: PERIOD, organizationId: ORG, year: 2026, status: periodStatus }],
     facility: [{ id: FACILITY, organizationId: ORG, name: 'Dar es Salaam Office' }],
@@ -64,6 +71,12 @@ async function enterWorkbook(service: ActivityDataService) {
   const petrol = await service.create(user, { ...base, categoryId: CAT.mobile, sourceName: 'Company vehicle', fuelOrMaterialType: 'Petrol', quantity: 3000, unit: 'litres' }, req());
   const power = await service.create(user, { ...base, categoryId: CAT.electricity, sourceName: 'Office electricity', quantity: 18000, unit: 'kWh', scope2Method: 'location_based' }, req());
   const commute = await service.create(user, { ...base, categoryId: CAT.commuting, sourceName: 'Staff commuting', quantity: 44160, unit: 'km' }, req());
+  // Category 6 — Business travel. (The workbook's long-haul flight line is 0 passenger-km, so it is not entered.)
+  await service.create(user, { ...base, categoryId: CAT.travel, sourceName: 'Air travel — short-haul', quantity: 6000, unit: 'passenger-km', emissionFactorId: 'ef-air-short' }, req());
+  await service.create(user, { ...base, categoryId: CAT.travel, sourceName: 'Hotel nights', quantity: 15, unit: 'room-nights', emissionFactorId: 'ef-hotel' }, req());
+  await service.create(user, { ...base, categoryId: CAT.travel, sourceName: 'Ground transport (client visits)', quantity: 800, unit: 'km', emissionFactorId: 'ef-taxi' }, req());
+  // Category 5 — Waste
+  await service.create(user, { ...base, categoryId: CAT.waste, sourceName: 'Office waste', quantity: 240, unit: 'kg' }, req());
   return { diesel, petrol, power, commute };
 }
 
@@ -85,6 +98,24 @@ describe('Reference workbook regression (in-memory)', () => {
     expect(byName['WTT — Petrol']).toBeCloseTo(1.77, 6);
     expect(byName['T&D losses — purchased electricity']).toBeCloseTo(1.0404, 6);
     expect(tonnesByCategory(prisma, CAT.commuting)).toBeCloseTo(7.5072, 6);
+  });
+
+  it('reproduces every Scope 3 line and the totals: Scope 3 = 12.3816 t, grand total = 28.1116 t', async () => {
+    const prisma = seed();
+    await enterWorkbook(makeService(prisma));
+    const line = (name: string) => Number(prisma.tables.activityData.find((r) => r.sourceName === name)!.emissionsTco2e);
+
+    // Summary Dashboard lines of the workbook
+    expect(line('Air travel — short-haul')).toBeCloseTo(0.9, 6);
+    expect(line('Hotel nights')).toBeCloseTo(0.3, 6);
+    expect(line('Ground transport (client visits)')).toBeCloseTo(0.136, 6);
+    expect(line('Office waste')).toBeCloseTo(0.108, 6);
+    expect(tonnesByCategory(prisma, CAT.fuelEnergy)).toBeCloseTo(3.4304, 6); // WTT + T&D
+
+    const scope3 = [CAT.fuelEnergy, CAT.waste, CAT.travel, CAT.commuting].reduce((s, c) => s + tonnesByCategory(prisma, c), 0);
+    const total = prisma.tables.activityData.reduce((s, r) => s + Number(r.emissionsTco2e), 0);
+    expect(scope3).toBeCloseTo(12.3816, 6);
+    expect(total).toBeCloseTo(28.1116, 6);
   });
 
   it('gives the same result when the same quantities are entered in other units (MWh, US gallons)', async () => {
