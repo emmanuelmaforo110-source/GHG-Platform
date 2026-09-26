@@ -13,6 +13,7 @@ import { AttachmentsModule } from './attachments/attachments.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AuditLogsModule } from './audit-logs/audit-logs.module';
 import { ReductionModule } from './reduction/reduction.module';
+import { OffsetsModule } from './offsets/offsets.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 
 @Module({
@@ -30,6 +31,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
     DashboardModule,
     AuditLogsModule,
     ReductionModule,
+    OffsetsModule,
   ],
   providers: [
     // Global JWT auth: every route requires a valid token unless decorated @Public().

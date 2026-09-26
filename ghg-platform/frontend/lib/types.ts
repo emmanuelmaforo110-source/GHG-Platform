@@ -319,3 +319,141 @@ export interface ReductionOverview {
   totals: { initiatives: number; plannedAnnualReductionTco2e: number; ideasAnnualReductionTco2e: number; savingInitiatives: number };
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Offsets: carbon credits, removals, Tanzanian projects and claims (Phase 3a)
+// ---------------------------------------------------------------------------------------------
+
+export type CreditRegistry = 'verra' | 'gold_standard' | 'plan_vivo' | 'acr' | 'car' | 'article_6_4' | 'tanzania_national' | 'other';
+export const REGISTRY_LABELS: Record<CreditRegistry, string> = {
+  verra: 'Verra (VCS)',
+  gold_standard: 'Gold Standard',
+  plan_vivo: 'Plan Vivo',
+  acr: 'ACR (American Carbon Registry)',
+  car: 'CAR (Climate Action Reserve)',
+  article_6_4: 'Article 6.4 (UN Paris Agreement mechanism)',
+  tanzania_national: 'Tanzania national registry',
+  other: 'Other',
+};
+export type CreditKind = 'avoidance_reduction' | 'removal_nature' | 'removal_technological';
+export const CREDIT_KIND_LABELS: Record<CreditKind, string> = {
+  avoidance_reduction: 'Avoids or reduces emissions',
+  removal_nature: 'Removes CO2 — nature (trees, soil)',
+  removal_technological: 'Removes CO2 — technology (biochar, capture)',
+};
+
+export interface CcpPrinciple { key: string; label: string }
+
+export interface CreditRetirementRow {
+  id: string;
+  quantityTco2e: string;
+  retiredOn: string;
+  claimYear: number;
+  beneficiary: string | null;
+  retirementReference: string;
+  evidenceUrl: string | null;
+}
+
+export interface CreditLotRow {
+  id: string;
+  projectName: string;
+  registry: CreditRegistry;
+  registryProjectId: string | null;
+  methodology: string | null;
+  kind: CreditKind;
+  country: string | null;
+  vintageYear: number;
+  serialRange: string | null;
+  quantityTco2e: string;
+  ccpLabelled: boolean;
+  article6Authorized: boolean;
+  correspondingAdjustment: boolean;
+  dueDiligence: Record<string, boolean | null> | null;
+  pricePerTonne: string | null;
+  currency: string | null;
+  tzProjectId: string | null;
+  notes: string | null;
+  retirements: CreditRetirementRow[];
+  retiredTco2e: number;
+  availableTco2e: number;
+  dueDiligenceScore: { passed: number; total: number; complete: boolean };
+}
+
+export type RemovalType = 'nature' | 'technological';
+export interface RemovalRow {
+  id: string;
+  projectName: string;
+  removalType: RemovalType;
+  method: string;
+  location: string | null;
+  reportingYear: number;
+  removedTco2e: string;
+  reversalsTco2e: string;
+  storageYears: number | null;
+  reversalRiskPct: string | null;
+  monitoringPlan: string | null;
+  inValueChain: boolean;
+  notes: string | null;
+}
+
+export type TzRegistrationStatus = 'concept' | 'submitted' | 'under_review' | 'approved' | 'registered' | 'rejected';
+export type Article6Status = 'not_applicable' | 'requested' | 'authorized' | 'refused';
+export interface TzProjectRow {
+  id: string;
+  name: string;
+  projectType: string;
+  isReddPlus: boolean;
+  region: string | null;
+  district: string | null;
+  proponent: string | null;
+  registrationStatus: TzRegistrationStatus;
+  registrationNumber: string | null;
+  ndcAlignment: string | null;
+  communitySharePct: string | null;
+  localGovernmentSharePct: string | null;
+  nationalSharePct: string | null;
+  otherSharePct: string | null;
+  benefitSharingNote: string | null;
+  article6Status: Article6Status;
+  expectedAnnualCredits: string | null;
+  standard: CreditRegistry | null;
+  notes: string | null;
+  warnings: string[];
+}
+
+export interface ClaimAttestation {
+  limitedAssurance: boolean;
+  assuranceProvider: string | null;
+  inventoryPublished: boolean;
+  publicDisclosureUrl: string | null;
+  advocacyParisAligned: boolean;
+  governanceInPlace: boolean;
+}
+
+export interface ClaimCheck {
+  claimYear: number;
+  grossEmissionsTco2e: number;
+  credits: {
+    eligibleRetiredTco2e: number;
+    ineligibleRetiredTco2e: number;
+    coveragePct: number;
+    items: {
+      retirementId: string;
+      projectName: string;
+      registry: CreditRegistry;
+      vintageYear: number;
+      quantityTco2e: number;
+      retirementReference: string;
+      eligible: boolean;
+      basis: string;
+      warnings: string[];
+    }[];
+  };
+  removals: { removedTco2e: number; reversalsTco2e: number; netRemovalsTco2e: number };
+  prerequisites: { key: string; label: string; met: boolean; source: 'platform' | 'attested'; note?: string }[];
+  attestation: ClaimAttestation | null;
+  tier: 'silver' | 'gold' | 'platinum' | null;
+  claimPossible: boolean;
+  summary: string;
+  reminders: string[];
+}

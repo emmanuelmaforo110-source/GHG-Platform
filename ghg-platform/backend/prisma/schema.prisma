@@ -91,6 +91,11 @@ model Organization {
   auditLogs        AuditLog[]
   reductionTargets     ReductionTarget[]
   reductionInitiatives ReductionInitiative[]
+  creditLots           CreditLot[]
+  creditRetirements    CreditRetirement[]
+  removalRecords       RemovalRecord[]
+  tzCarbonProjects     TzCarbonProject[]
+  claimAttestations    ClaimAttestation[]
 
   @@map("organizations")
 }
@@ -424,5 +429,189 @@ model ReductionInitiative {
 
   @@index([organizationId])
   @@map("reduction_initiatives")
+}
+
+// ---------- Offset (Phase 3a): carbon credits, removals, Tanzanian projects, claims ----------
+// Credits and removals are kept OUTSIDE the emissions inventory: gross emissions are never reduced
+// by them. They are reported next to the inventory and used only for claims (VCMI).
+
+enum CreditRegistry {
+  verra
+  gold_standard
+  plan_vivo
+  acr
+  car
+  article_6_4
+  tanzania_national
+  other
+}
+
+enum CreditKind {
+  avoidance_reduction     // e.g. cookstoves, renewable energy, avoided deforestation (REDD+)
+  removal_nature          // e.g. afforestation, soil carbon
+  removal_technological   // e.g. biochar, direct air capture
+}
+
+model CreditLot {
+  id                        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId            String         @map("organization_id") @db.Uuid
+  projectName               String         @map("project_name")
+  registry                  CreditRegistry
+  registryProjectId         String?        @map("registry_project_id")
+  methodology               String?
+  kind                      CreditKind     @default(avoidance_reduction)
+  country                   String?
+  vintageYear               Int            @map("vintage_year")
+  serialRange               String?        @map("serial_range")
+  quantityTco2e             Decimal        @map("quantity_tco2e") @db.Decimal(14, 4)
+  // Quality: ICVCM Core Carbon Principles label, Article 6 authorisation / corresponding adjustment
+  ccpLabelled               Boolean        @default(false) @map("ccp_labelled")
+  article6Authorized        Boolean        @default(false) @map("article6_authorized")
+  correspondingAdjustment   Boolean        @default(false) @map("corresponding_adjustment")
+  // Due-diligence checklist against the 10 Core Carbon Principles: { principleKey: true|false|null }
+  dueDiligence              Json?          @map("due_diligence")
+  purchaseDate              DateTime?      @map("purchase_date")
+  pricePerTonne             Decimal?       @map("price_per_tonne") @db.Decimal(14, 2)
+  currency                  String?
+  tzProjectId               String?        @map("tz_project_id") @db.Uuid
+  notes                     String?
+  createdBy                 String?        @map("created_by") @db.Uuid
+  createdAt                 DateTime       @default(now()) @map("created_at")
+  updatedAt                 DateTime       @default(now()) @updatedAt @map("updated_at")
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tzProject    TzCarbonProject?   @relation(fields: [tzProjectId], references: [id], onDelete: SetNull)
+  retirements  CreditRetirement[]
+
+  @@index([organizationId])
+  @@map("credit_lots")
+}
+
+model CreditRetirement {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  lotId           String   @map("lot_id") @db.Uuid
+  quantityTco2e   Decimal  @map("quantity_tco2e") @db.Decimal(14, 4)
+  retiredOn       DateTime @map("retired_on")
+  // The reporting year whose claim these credits support
+  claimYear       Int      @map("claim_year")
+  beneficiary     String?
+  // Registry retirement reference / serial numbers retired; the certificate is kept as evidence
+  retirementReference String @map("retirement_reference")
+  evidenceUrl     String?  @map("evidence_url")
+  notes           String?
+  createdBy       String?  @map("created_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lot          CreditLot    @relation(fields: [lotId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, claimYear])
+  @@map("credit_retirements")
+}
+
+enum RemovalType {
+  nature
+  technological
+}
+
+// GHG Protocol Land Sector and Removals Standard: removals reported separately from the inventory,
+// with storage monitoring and reversal risk.
+model RemovalRecord {
+  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId     String      @map("organization_id") @db.Uuid
+  projectName        String      @map("project_name")
+  removalType        RemovalType @map("removal_type")
+  method             String      // e.g. agroforestry, reforestation, soil carbon, biochar
+  location           String?
+  reportingYear      Int         @map("reporting_year")
+  removedTco2e       Decimal     @map("removed_tco2e") @db.Decimal(14, 4)
+  reversalsTco2e     Decimal     @default(0) @map("reversals_tco2e") @db.Decimal(14, 4)
+  storageYears       Int?        @map("storage_years")
+  reversalRiskPct    Decimal?    @map("reversal_risk_pct") @db.Decimal(5, 2)
+  monitoringPlan     String?     @map("monitoring_plan")
+  lastMonitoredOn    DateTime?   @map("last_monitored_on")
+  inValueChain       Boolean     @default(true) @map("in_value_chain")
+  evidenceUrl        String?     @map("evidence_url")
+  notes              String?
+  createdBy          String?     @map("created_by") @db.Uuid
+  createdAt          DateTime    @default(now()) @map("created_at")
+  updatedAt          DateTime    @default(now()) @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, reportingYear])
+  @@map("removal_records")
+}
+
+enum TzRegistrationStatus {
+  concept
+  submitted
+  under_review
+  approved
+  registered
+  rejected
+}
+
+enum Article6Status {
+  not_applicable
+  requested
+  authorized
+  refused
+}
+
+// Tanzania carbon trading regulations (2022, amended 2023): project registration, NDC alignment,
+// benefit sharing, and Article 6 authorisation for credits transferred abroad.
+model TzCarbonProject {
+  id                    String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId        String               @map("organization_id") @db.Uuid
+  name                  String
+  projectType           String               @map("project_type")
+  isReddPlus            Boolean              @default(false) @map("is_redd_plus")
+  region                String?
+  district              String?
+  proponent             String?
+  registrationStatus    TzRegistrationStatus @default(concept) @map("registration_status")
+  registrationNumber    String?              @map("registration_number")
+  ndcAlignment          String?              @map("ndc_alignment")
+  // Benefit sharing, % of gross revenue as agreed / required for this project
+  communitySharePct     Decimal?             @map("community_share_pct") @db.Decimal(5, 2)
+  localGovernmentSharePct Decimal?           @map("local_government_share_pct") @db.Decimal(5, 2)
+  nationalSharePct      Decimal?             @map("national_share_pct") @db.Decimal(5, 2)
+  otherSharePct         Decimal?             @map("other_share_pct") @db.Decimal(5, 2)
+  benefitSharingNote    String?              @map("benefit_sharing_note")
+  article6Status        Article6Status       @default(not_applicable) @map("article6_status")
+  expectedAnnualCredits Decimal?             @map("expected_annual_credits") @db.Decimal(14, 2)
+  standard              CreditRegistry?
+  notes                 String?
+  createdBy             String?              @map("created_by") @db.Uuid
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @default(now()) @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  creditLots   CreditLot[]
+
+  @@index([organizationId])
+  @@map("tz_carbon_projects")
+}
+
+// The organisation's statements needed for a VCMI claim that the platform cannot see in its own data.
+model ClaimAttestation {
+  id                      String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId          String   @map("organization_id") @db.Uuid
+  claimYear               Int      @map("claim_year")
+  limitedAssurance        Boolean  @default(false) @map("limited_assurance")
+  assuranceProvider       String?  @map("assurance_provider")
+  inventoryPublished      Boolean  @default(false) @map("inventory_published")
+  publicDisclosureUrl     String?  @map("public_disclosure_url")
+  advocacyParisAligned    Boolean  @default(false) @map("advocacy_paris_aligned")
+  governanceInPlace       Boolean  @default(false) @map("governance_in_place")
+  updatedBy               String?  @map("updated_by") @db.Uuid
+  updatedAt               DateTime @default(now()) @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, claimYear])
+  @@map("claim_attestations")
 }
 

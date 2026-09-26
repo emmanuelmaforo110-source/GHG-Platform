@@ -12,6 +12,27 @@ budget time for the inevitable small fixes (a typo, a version mismatch) on first
 
 ---
 
+## Phase 3a (Offset: credits, removals, claims) — what changed
+
+On the Git branch `phase-3a-offsets` (built on top of `phase-2-reduce`). New page: **Offset: credits & claims**, with four tabs.
+
+| Area | Change |
+| --- | --- |
+| Carbon credits | A register of credit lots: project, registry (Verra, Gold Standard, Plan Vivo, ACR, CAR, Article 6.4, Tanzania national registry, other), vintage, quantity, price, serial numbers, and whether the lot carries the ICVCM CCP label (Integrity Council for the Voluntary Carbon Market, Core Carbon Principles), is authorised under Article 6 of the Paris Agreement and has a corresponding adjustment. Lots without the label have a 10-point quality checklist (one tick per Core Carbon Principle). |
+| Retirements | Admins record retirements already made in the registry, with the registry reference and the claim year. The platform refuses to retire more than is left in a lot, to lower a lot below what is retired, or to delete a lot with retirements. |
+| Removals | A ledger of CO2 removed by your own operations or value chain (trees, soil, biochar…): tonnes removed, reversals, storage period, reversal risk and monitoring plan. Reported next to the inventory, never subtracted from it (GHG Protocol Land Sector and Removals Standard). |
+| Tanzanian projects | Projects with registration status and number, how they support Tanzania's NDC (Nationally Determined Contribution), benefit-sharing percentages (refused if they add up to more than 100%), REDD+ flag and Article 6 authorisation. Each project lists the regulatory points still open. Credit lots can be linked to a project. |
+| Claim check | For a chosen year: gross emissions (never reduced by credits), eligible credits retired for that year and the share of emissions they cover, net removals, and the VCMI (Voluntary Carbon Markets Integrity Initiative) prerequisites — approved inventory, science-aligned Scope 1 + 2 target that is on track (from the platform), plus assurance, publication, governance and Paris-aligned advocacy (confirmed by an Admin). Tier: Silver 10%+, Gold 50%+, Platinum 100%+. |
+| Credit rules | CCP-labelled and Article 6.4 credits always count. Until the end of 2026, credits with all 10 checklist items ticked also count; from 2027 they do not. Vintages more than 5 years older than the claim year get a warning. The rules sit in `backend/src/offsets/claims.math.ts` so they are easy to update when VCMI or ICVCM change them. |
+| API | `GET /api/offsets/ccp-principles`; `GET/POST/PATCH/DELETE /api/offsets/credits`, `POST /api/offsets/credits/:id/retire`, `DELETE /api/offsets/retirements/:id`; `GET/POST/PATCH/DELETE /api/offsets/removals`; `GET/POST/PATCH/DELETE /api/offsets/tz-projects`; `GET /api/offsets/claims/:year`, `PUT /api/offsets/claims/:year/attestation`. |
+| Roles | Everyone can view. Admins and data-entry users add and edit. Only Admins retire credits, confirm claim prerequisites and delete. |
+| Database | Migration `20260926120000_phase3a_offsets` (tables `credit_lots`, `credit_retirements`, `removal_records`, `tz_carbon_projects`, `claim_attestations`). |
+| Tests | 90 unit tests (new: credit eligibility, VCMI tiers, retirement limits, benefit-share check, regulatory warnings, claim check end to end). |
+
+Before a public claim, confirm the current VCMI Claims Code, ICVCM rules and Tanzanian carbon trading regulations; the platform supports the checks but is not a legal opinion.
+
+After pulling: in `backend/` run `npx prisma migrate deploy` and `npx prisma generate`, then restart the API.
+
 ## Phase 2 (Reduce) — what changed
 
 On the Git branch `phase-2-reduce` (built on top of `phase-1-inventory`). New page: **Reduce: targets & plan**.

@@ -14,7 +14,15 @@ const copy = (r: Row | undefined): any => (r ? { ...r } : null);
 // Supports `include: { category: true, facility: true }` style lookups via "<name>Id" foreign keys,
 // and relation filters such as `where: { category: { scope: 'scope_3' } }`.
 type Tables = Record<string, Row[]>;
-const TABLE_FOR: Record<string, string> = { category: 'ghgCategory', facility: 'facility', reportingPeriod: 'reportingPeriod' };
+const TABLE_FOR: Record<string, string> = {
+  category: 'ghgCategory',
+  facility: 'facility',
+  reportingPeriod: 'reportingPeriod',
+  lot: 'creditLot',
+  tzProject: 'tzCarbonProject',
+};
+// One-to-many relations for `include`: relation name -> [table, foreign key on that table]
+const HAS_MANY: Record<string, [string, string]> = { retirements: ['creditRetirement', 'lotId'] };
 
 function matches(row: Row, where: Row = {}, tables?: Tables): boolean {
   return Object.entries(where).every(([key, cond]) => {
@@ -45,6 +53,11 @@ function model(table: Row[], tables: Tables) {
     if (!c || !include) return c;
     for (const [rel, on] of Object.entries(include)) {
       if (!on) continue;
+      if (HAS_MANY[rel]) {
+        const [tbl, fk] = HAS_MANY[rel];
+        c[rel] = (tables[tbl] ?? []).filter((t) => t[fk] === c.id).map(copy);
+        continue;
+      }
       const target = tables[TABLE_FOR[rel] ?? rel];
       if (target) c[rel] = copy(target.find((t) => t.id === c[`${rel}Id`]));
     }
@@ -109,6 +122,11 @@ export function createFakePrisma(seed: {
   user?: Row[];
   reductionTarget?: Row[];
   reductionInitiative?: Row[];
+  creditLot?: Row[];
+  creditRetirement?: Row[];
+  removalRecord?: Row[];
+  tzCarbonProject?: Row[];
+  claimAttestation?: Row[];
 }) {
   const tables = {
     ghgCategory: seed.ghgCategory ?? [],
@@ -121,6 +139,11 @@ export function createFakePrisma(seed: {
     user: seed.user ?? [],
     reductionTarget: seed.reductionTarget ?? [],
     reductionInitiative: seed.reductionInitiative ?? [],
+    creditLot: seed.creditLot ?? [],
+    creditRetirement: seed.creditRetirement ?? [],
+    removalRecord: seed.removalRecord ?? [],
+    tzCarbonProject: seed.tzCarbonProject ?? [],
+    claimAttestation: seed.claimAttestation ?? [],
   };
   return {
     tables,
@@ -150,6 +173,27 @@ export function createFakePrisma(seed: {
     user: model(tables.user, tables),
     reductionTarget: model(tables.reductionTarget, tables),
     reductionInitiative: model(tables.reductionInitiative, tables),
+    creditLot: model(tables.creditLot, tables),
+    creditRetirement: model(tables.creditRetirement, tables),
+    removalRecord: model(tables.removalRecord, tables),
+    tzCarbonProject: model(tables.tzCarbonProject, tables),
+    claimAttestation: {
+      ...model(tables.claimAttestation, tables),
+      // upsert keyed by organizationId + claimYear, as in the schema
+      upsert: async (args: Row) => {
+        const key = args.where.organizationId_claimYear;
+        const existing = tables.claimAttestation.find(
+          (r) => r.organizationId === key.organizationId && r.claimYear === key.claimYear,
+        );
+        if (existing) {
+          Object.assign(existing, args.update);
+          return copy(existing);
+        }
+        const row = { id: randomUUID(), updatedAt: new Date(), ...args.create };
+        tables.claimAttestation.push(row);
+        return copy(row);
+      },
+    },
     $transaction: async (ops: Promise<any>[]) => Promise.all(ops),
   };
 }

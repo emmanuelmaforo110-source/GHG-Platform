@@ -34,6 +34,7 @@ export function Sidebar() {
         {navItem('/dashboard', 'Dashboard', pathname === '/dashboard')}
         {navItem('/report', 'Inventory report', pathname === '/report')}
         {navItem('/reduction', 'Reduce: targets & plan', pathname === '/reduction')}
+        {navItem('/offsets', 'Offset: credits & claims', pathname === '/offsets')}
         {navItem('/scope3-screening', 'Scope 3 screening', pathname === '/scope3-screening')}
         <RoleGate allow={['admin', 'data_entry']}>
           {navItem('/activity-data', 'Activity data', pathname === '/activity-data')}
