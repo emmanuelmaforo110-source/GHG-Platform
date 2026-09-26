@@ -89,6 +89,8 @@ model Organization {
   activityData     ActivityData[]
   relevanceScreens Scope3RelevanceScreen[]
   auditLogs        AuditLog[]
+  reductionTargets     ReductionTarget[]
+  reductionInitiatives ReductionInitiative[]
 
   @@map("organizations")
 }
@@ -150,6 +152,7 @@ model GhgCategory {
   emissionFactors  EmissionFactor[]
   activityData     ActivityData[]
   relevanceScreens Scope3RelevanceScreen[]
+  initiatives      ReductionInitiative[]
 
   @@unique([scope, scope3CategoryNo])
   @@map("ghg_categories")
@@ -348,3 +351,78 @@ model AuditLog {
   @@index([entityType, entityId])
   @@map("audit_logs")
 }
+
+// ---------- Reduce (Phase 2): targets and reduction initiatives ----------
+
+enum TargetCoverage {
+  scope_1_2 // Scope 1 + Scope 2 (location-based)
+  scope_3
+  all_scopes
+}
+
+enum TargetType {
+  absolute  // cut total tCO2e by X% from the base year
+  intensity // cut tCO2e per employee (FTE) by X% from the base year
+}
+
+enum InitiativeStatus {
+  idea
+  planned
+  in_progress
+  completed
+  cancelled
+}
+
+model ReductionTarget {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String         @map("organization_id") @db.Uuid
+  name            String
+  coverage        TargetCoverage
+  targetType      TargetType     @default(absolute) @map("target_type")
+  baseYear        Int            @map("base_year")
+  // Base-year emissions (tCO2e) for the covered scopes; for intensity targets, tCO2e per FTE.
+  // Taken from the base-year reporting period when the target is created, or entered by hand.
+  baseYearValue   Decimal        @map("base_year_value") @db.Decimal(16, 6)
+  targetYear      Int            @map("target_year")
+  reductionPct    Decimal        @map("reduction_pct") @db.Decimal(5, 2)
+  notes           String?
+  createdBy       String?        @map("created_by") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @default(now()) @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("reduction_targets")
+}
+
+model ReductionInitiative {
+  id                    String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId        String           @map("organization_id") @db.Uuid
+  name                  String
+  description           String?
+  scope                 GhgScope
+  categoryId            Int?             @map("category_id")
+  status                InitiativeStatus @default(idea)
+  startYear             Int              @map("start_year")
+  lifetimeYears         Int              @map("lifetime_years")
+  // Expected reduction per year once running (tCO2e / year)
+  annualReductionTco2e  Decimal          @map("annual_reduction_tco2e") @db.Decimal(14, 4)
+  // Up-front investment and the change in yearly running costs (negative = yearly savings)
+  capex                 Decimal          @default(0) @db.Decimal(16, 2)
+  annualOpexChange      Decimal          @default(0) @map("annual_opex_change") @db.Decimal(16, 2)
+  currency              String           @default("USD")
+  discountRatePct       Decimal          @default(10) @map("discount_rate_pct") @db.Decimal(5, 2)
+  owner                 String?
+  notes                 String?
+  createdBy             String?          @map("created_by") @db.Uuid
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @default(now()) @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     GhgCategory? @relation(fields: [categoryId], references: [id])
+
+  @@index([organizationId])
+  @@map("reduction_initiatives")
+}
+

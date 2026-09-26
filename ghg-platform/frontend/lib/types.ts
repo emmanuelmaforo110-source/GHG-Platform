@@ -240,3 +240,82 @@ export interface Scope3CompletenessRow {
   isQuantified: boolean;
   relevanceAssessment: string;
 }
+
+// ---------- Phase 2: Reduce ----------
+
+export type TargetCoverage = 'scope_1_2' | 'scope_3' | 'all_scopes';
+export type InitiativeStatus = 'idea' | 'planned' | 'in_progress' | 'completed' | 'cancelled';
+
+export const INITIATIVE_STATUS_LABELS: Record<InitiativeStatus, string> = {
+  idea: 'Idea',
+  planned: 'Planned',
+  in_progress: 'In progress',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+};
+
+export interface ReductionTargetRow {
+  id: string;
+  name: string;
+  coverage: TargetCoverage;
+  coverageLabel: string;
+  targetType: 'absolute' | 'intensity';
+  unit: string;
+  baseYear: number;
+  baseYearValue: number;
+  targetYear: number;
+  reductionPct: number;
+  targetValue: number;
+  notes: string | null;
+  progress: { year: number; actual: number; expected: number; changeFromBasePct: number; status: 'on_track' | 'off_track' } | null;
+  ambition: { annualRatePct: number; requiredAnnualRatePct: number; pathway: string; meetsReferenceRate: boolean } | null;
+}
+
+export interface ReductionInitiativeRow {
+  id: string;
+  name: string;
+  description: string | null;
+  scope: 'scope_1' | 'scope_2' | 'scope_3';
+  categoryId: number | null;
+  category: GhgCategory | null;
+  status: InitiativeStatus;
+  startYear: number;
+  lifetimeYears: number;
+  annualReductionTco2e: string;
+  capex: string;
+  annualOpexChange: string;
+  currency: string;
+  discountRatePct: string;
+  owner: string | null;
+  notes: string | null;
+  costPerTonne: number;
+  annualCost: number;
+  lifetimeReductionTco2e: number;
+}
+
+export interface MaccBar {
+  id: string;
+  name: string;
+  status: InitiativeStatus;
+  currency: string;
+  annualReductionTco2e: number;
+  costPerTonne: number;
+  annualCost: number;
+  cumulativeStartTco2e: number;
+  cumulativeEndTco2e: number;
+}
+
+export interface ReductionOverview {
+  currency: string;
+  currencies: string[];
+  macc: MaccBar[];
+  scenario: {
+    growthPct: number;
+    latestRecordedYear: number | null;
+    targetSeries: { key: string; name: string }[];
+    years: Record<string, number | null>[];
+  };
+  targets: ReductionTargetRow[];
+  totals: { initiatives: number; plannedAnnualReductionTco2e: number; ideasAnnualReductionTco2e: number; savingInitiatives: number };
+}
+

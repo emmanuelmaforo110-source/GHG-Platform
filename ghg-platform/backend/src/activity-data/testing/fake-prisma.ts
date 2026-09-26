@@ -107,6 +107,8 @@ export function createFakePrisma(seed: {
   organization?: Row[];
   scope3RelevanceScreen?: Row[];
   user?: Row[];
+  reductionTarget?: Row[];
+  reductionInitiative?: Row[];
 }) {
   const tables = {
     ghgCategory: seed.ghgCategory ?? [],
@@ -117,6 +119,8 @@ export function createFakePrisma(seed: {
     organization: seed.organization ?? [],
     scope3RelevanceScreen: seed.scope3RelevanceScreen ?? [],
     user: seed.user ?? [],
+    reductionTarget: seed.reductionTarget ?? [],
+    reductionInitiative: seed.reductionInitiative ?? [],
   };
   return {
     tables,
@@ -144,6 +148,8 @@ export function createFakePrisma(seed: {
       },
     },
     user: model(tables.user, tables),
+    reductionTarget: model(tables.reductionTarget, tables),
+    reductionInitiative: model(tables.reductionInitiative, tables),
     $transaction: async (ops: Promise<any>[]) => Promise.all(ops),
   };
 }

@@ -33,6 +33,7 @@ export function Sidebar() {
       <nav className="flex flex-1 gap-1 overflow-x-auto p-3 md:block md:space-y-1">
         {navItem('/dashboard', 'Dashboard', pathname === '/dashboard')}
         {navItem('/report', 'Inventory report', pathname === '/report')}
+        {navItem('/reduction', 'Reduce: targets & plan', pathname === '/reduction')}
         {navItem('/scope3-screening', 'Scope 3 screening', pathname === '/scope3-screening')}
         <RoleGate allow={['admin', 'data_entry']}>
           {navItem('/activity-data', 'Activity data', pathname === '/activity-data')}

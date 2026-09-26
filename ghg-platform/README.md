@@ -12,6 +12,23 @@ budget time for the inevitable small fixes (a typo, a version mismatch) on first
 
 ---
 
+## Phase 2 (Reduce) — what changed
+
+On the Git branch `phase-2-reduce` (built on top of `phase-1-inventory`). New page: **Reduce: targets & plan**.
+
+| Area | Change |
+| --- | --- |
+| Targets | Admins set targets for Scope 1 + 2, Scope 3 or all scopes; absolute (total tCO2e) or intensity (tCO2e per employee). The base-year value is taken from the inventory (or entered by hand). Each target shows its straight-line path, the latest recorded year against that path (on track / off track), and an indicative ambition check against the SBTi reference rates (4.2% a year for 1.5°C Scope 1 + 2; 2.5% a year for well-below-2°C Scope 3 — confirm against the current SBTi criteria before submitting). |
+| Initiatives | Admins and data-entry users record reduction projects: scope and emission source, status (idea → planned → in progress → completed / cancelled), start year, lifetime, tCO2e avoided per year, one-off investment, change in yearly running costs (negative = savings), currency, discount rate and owner. |
+| Cost per tonne | (investment × capital recovery factor + yearly running-cost change) ÷ tonnes avoided per year. Negative = the project saves money as well as emissions. |
+| MACC chart | Marginal abatement cost curve: initiatives from cheapest to most expensive per tonne; bar width = tonnes a year. One currency at a time. |
+| Scenarios | Business as usual (latest recorded year held flat, or grown by a chosen % a year) vs. with the plan (minus planned / in-progress / completed initiatives starting after the latest recorded year) vs. each absolute target's path, alongside recorded emissions. |
+| API | `GET /api/reduction/overview`, `GET/POST/DELETE /api/reduction/targets`, `GET/POST/PATCH/DELETE /api/reduction/initiatives`. |
+| Database | Migration `20260926090000_phase2_reduce` (tables `reduction_targets`, `reduction_initiatives`). |
+| Tests | 76 unit tests (new: capital recovery factor, cost per tonne, MACC ordering, target path, ambition check, target progress, scenarios, currencies). |
+
+After pulling: in `backend/` run `npx prisma migrate deploy` and `npx prisma generate`, then restart the API.
+
 ## Phase 1, part 2 — what changed
 
 Also on the branch `phase-1-inventory`.
