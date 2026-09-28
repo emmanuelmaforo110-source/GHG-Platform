@@ -26,6 +26,7 @@ export interface Facility {
   address: string | null;
   country: string | null;
   isActive: boolean;
+  entryCount?: number; // only on the Admin list (?includeInactive=true)
 }
 
 export interface GhgCategory {
@@ -84,6 +85,15 @@ export interface ReportingPeriod {
   recalculationThresholdPct: string;
   gwpSet?: GwpSet;
   boundaryApproach?: BoundaryApproach;
+  submittedBy?: string | null;
+  submittedAt?: string | null;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  returnReason?: string | null;
+  returnedAt?: string | null;
+  submittedByName?: string | null;
+  approvedByName?: string | null;
+  returnedByName?: string | null;
 }
 
 export interface ActivityDataRow {
@@ -120,7 +130,7 @@ export interface ActivityDataRow {
   notes: string | null;
   status: ReportingStatus;
   enteredAt: string;
-  attachments?: { id: string; fileName: string; fileUrl: string }[];
+  attachments?: Attachment[];
 }
 
 export interface CreateActivityDataInput {
@@ -456,4 +466,15 @@ export interface ClaimCheck {
   claimPossible: boolean;
   summary: string;
   reminders: string[];
+}
+
+export interface Attachment {
+  id: string;
+  activityDataId: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string | null;
+  fileSizeBytes: number | null;
+  uploadedBy: string;
+  uploadedAt: string;
 }

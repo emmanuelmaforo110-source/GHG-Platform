@@ -12,6 +12,25 @@ budget time for the inevitable small fixes (a typo, a version mismatch) on first
 
 ---
 
+## Inventory polish (September 2026) — what changed
+
+On the Git branch `inventory-polish` (built on top of `phase-3a-offsets`).
+
+| Area | Change |
+| --- | --- |
+| Facilities page | New **Admin → Facilities** screen: add, rename and edit offices, branches, sites or fleets; make a closed facility inactive (its past entries stay) and reactivate it. New entries cannot be added to an inactive facility, and a facility that a user is restricted to cannot be made inactive. |
+| Evidence | New **Evidence** page (all roles): pick a year, see every entry with its bills and receipts, download them, and filter "only entries without evidence" with a coverage percentage. Admins and data-entry users can add or remove files while the period is a draft; after submission evidence is frozen. The Activity data table shows how many files each entry has. Downloads go through the API, so they also work with a private storage bucket. |
+| Bug fix | Uploading evidence failed because file sizes (stored as BigInt) could not be converted to JSON; the same problem broke the Activity data list once a file was attached. Fixed for the whole API (`common/bigint-json.ts`). |
+| Approval rules | The person who submitted a period can no longer approve it (separation of duties). An Admin can **send back** a submitted period to draft with a note, which is shown to the team. The screen shows who submitted, approved or sent back each period and when. A period with no entries cannot be submitted. Data-entry users get a "Submit for approval" menu item. |
+| Emission factors | All default factors are marked as reviewed (September 2026). The Tanzania grid factor's source now records the confirmation against the UNFCCC calculator (IFI 2021: 0.336 kg CO2e/kWh). Values are unchanged. |
+| API | `GET /api/facilities?includeInactive=true`, `PATCH /api/facilities/:id`; `GET /api/activity-data/:id/attachments/:attachmentId/download`, `DELETE /api/activity-data/:id/attachments/:attachmentId`; `PATCH /api/reporting-periods/:id/return`. |
+| Database | Migration `20260928090000_inventory_polish` (return columns on `reporting_periods`; marks default factors reviewed). |
+| Tests | 101 unit tests (new: facilities, evidence download/removal rules, file-size JSON, separation of duties, send back). |
+
+**To test approval on your computer:** approval now needs two people. Sign in as the demo Admin, go to **Admin → Users** and invite a second Admin (or a data-entry user who submits). Submit with one account and approve with the other.
+
+After pulling: in `backend/` run `npx prisma migrate deploy` and `npx prisma generate`, then restart the API.
+
 ## Phase 3a (Offset: credits, removals, claims) — what changed
 
 On the Git branch `phase-3a-offsets` (built on top of `phase-2-reduce`). New page: **Offset: credits & claims**, with four tabs.
@@ -326,8 +345,7 @@ flawless `npm run dev` on the very first try.
    `GET /ghg-categories` on the backend, matching the `facilities`/`reporting-periods` pattern.
 3. **Scope3RelevanceScreen has no write UI yet** — same gap noted below for the backend; the
    dashboard's completeness panel is read-only until that endpoint and a small admin form exist.
-4. **Attachments aren't listed/downloadable in the UI yet** — upload works end-to-end, but there's
-   no screen to browse previously uploaded evidence per activity row.
+4. ~~**Attachments aren't listed/downloadable in the UI yet**~~ — done: the Evidence page (inventory polish).
 
 ## 6. What's next on the backend (not yet built)
 

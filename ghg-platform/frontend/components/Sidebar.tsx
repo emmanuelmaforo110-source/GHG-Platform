@@ -36,9 +36,13 @@ export function Sidebar() {
         {navItem('/reduction', 'Reduce: targets & plan', pathname === '/reduction')}
         {navItem('/offsets', 'Offset: credits & claims', pathname === '/offsets')}
         {navItem('/scope3-screening', 'Scope 3 screening', pathname === '/scope3-screening')}
+        {navItem('/evidence', 'Evidence', pathname === '/evidence')}
         <RoleGate allow={['admin', 'data_entry']}>
           {navItem('/activity-data', 'Activity data', pathname === '/activity-data')}
           {navItem('/activity-data/import', 'Import data', pathname === '/activity-data/import')}
+        </RoleGate>
+        <RoleGate allow={['data_entry']}>
+          {navItem('/admin/reporting-periods', 'Submit for approval', pathname === '/admin/reporting-periods')}
         </RoleGate>
         <RoleGate allow={['verifier']}>
           {navItem('/admin/audit-logs', 'Audit logs', pathname === '/admin/audit-logs')}

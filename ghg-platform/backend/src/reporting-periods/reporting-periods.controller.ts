@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, UseGuards, UseInterceptors } from '@nestjs/common';
-import { CreateReportingPeriodDto, Scope3ScreenDto, UpdateReportingPeriodDto } from './dto/reporting-period.dto';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Req, UseGuards, UseInterceptors } from '@nestjs/common';
+import { CreateReportingPeriodDto, ReturnToDraftDto, Scope3ScreenDto, UpdateReportingPeriodDto } from './dto/reporting-period.dto';
 import { ReportingPeriodsService } from './reporting-periods.service';
 import { CurrentUser, AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -60,6 +60,13 @@ export class ReportingPeriodsController {
   @Audit({ action: 'submit', entityType: 'reporting_periods' })
   submit(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.service.submit(user, id);
+  }
+
+  @Patch(':id/return')
+  @Roles('admin')
+  @Audit({ action: 'update', entityType: 'reporting_periods' })
+  returnToDraft(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ReturnToDraftDto, @Req() req: any) {
+    return this.service.returnToDraft(user, id, dto.reason, req);
   }
 
   @Patch(':id/approve')

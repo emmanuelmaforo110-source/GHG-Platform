@@ -219,6 +219,11 @@ export default function ActivityDataPage() {
             This period is <strong className="capitalize">{selectedPeriod.status}</strong>. Activity data is read-only after submission.
           </div>
         )}
+        {selectedPeriod && periodIsEditable && selectedPeriod.returnReason && (
+          <div className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            This period was sent back for corrections{selectedPeriod.returnedByName ? ` by ${selectedPeriod.returnedByName}` : ''}: {selectedPeriod.returnReason}
+          </div>
+        )}
         {editingId && (
           <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800">
             You are editing an existing entry. The old values are kept in the audit log.
@@ -482,13 +487,14 @@ export default function ActivityDataPage() {
           <p className="text-sm text-gray-400">No entries yet.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
+            <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
               <tr className="border-b border-gray-100 text-xs uppercase text-gray-400">
                 <th className="py-2 font-normal">Source</th>
                 <th className="py-2 font-normal">Category</th>
                 <th className="py-2 font-normal">Quantity</th>
                 <th className="py-2 font-normal">Quality</th>
+                <th className="py-2 font-normal">Evidence</th>
                 <th className="py-2 text-right font-normal">tCO2e</th>
                 <th className="py-2 text-right font-normal"><span className="sr-only">Actions</span></th>
               </tr>
@@ -501,6 +507,15 @@ export default function ActivityDataPage() {
                   <td className="py-2 text-gray-500">{Number(r.quantity).toLocaleString()} {r.unit}</td>
                   <td className="py-2 text-gray-500" title={r.dataQualityScore ? DATA_QUALITY_LABELS[r.dataQualityScore] : 'Not scored yet'}>
                     {r.dataQualityScore ?? '—'}
+                  </td>
+                  <td className="py-2 text-gray-500">
+                    {r.sourceActivityDataId ? '' : (r.attachments ?? []).length > 0 ? (
+                      <Link href={`/evidence?period=${r.reportingPeriodId}`} className="text-blue-700 hover:underline">
+                        {(r.attachments ?? []).length} file{(r.attachments ?? []).length === 1 ? '' : 's'}
+                      </Link>
+                    ) : (
+                      <span className="text-amber-700">None</span>
+                    )}
                   </td>
                   <td className="py-2 text-right">
                     {Number(r.emissionsTco2e).toFixed(4)}

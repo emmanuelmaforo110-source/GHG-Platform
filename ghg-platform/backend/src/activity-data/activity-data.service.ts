@@ -72,6 +72,9 @@ export class ActivityDataService {
       where: { id: facilityId, organizationId: user.organizationId },
     });
     if (!facility) throw new NotFoundException('Facility not found for this organization.');
+    if (facility.isActive === false) {
+      throw new BadRequestException(`"${facility.name}" is inactive. Reactivate it on the Facilities page to add new entries.`);
+    }
   }
 
   /** Loads a row of the caller's organization, checking facility restriction and that it's not auto-derived. */

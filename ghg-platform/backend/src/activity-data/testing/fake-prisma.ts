@@ -20,6 +20,7 @@ const TABLE_FOR: Record<string, string> = {
   reportingPeriod: 'reportingPeriod',
   lot: 'creditLot',
   tzProject: 'tzCarbonProject',
+  activityData: 'activityData',
 };
 // One-to-many relations for `include`: relation name -> [table, foreign key on that table]
 const HAS_MANY: Record<string, [string, string]> = { retirements: ['creditRetirement', 'lotId'] };
@@ -127,6 +128,7 @@ export function createFakePrisma(seed: {
   removalRecord?: Row[];
   tzCarbonProject?: Row[];
   claimAttestation?: Row[];
+  attachment?: Row[];
 }) {
   const tables = {
     ghgCategory: seed.ghgCategory ?? [],
@@ -144,6 +146,7 @@ export function createFakePrisma(seed: {
     removalRecord: seed.removalRecord ?? [],
     tzCarbonProject: seed.tzCarbonProject ?? [],
     claimAttestation: seed.claimAttestation ?? [],
+    attachment: seed.attachment ?? [],
   };
   return {
     tables,
@@ -173,6 +176,7 @@ export function createFakePrisma(seed: {
     user: model(tables.user, tables),
     reductionTarget: model(tables.reductionTarget, tables),
     reductionInitiative: model(tables.reductionInitiative, tables),
+    attachment: model(tables.attachment, tables),
     creditLot: model(tables.creditLot, tables),
     creditRetirement: model(tables.creditRetirement, tables),
     removalRecord: model(tables.removalRecord, tables),

@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { Readable } from 'stream';
+import { attachmentKey } from './attachment-key';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -30,6 +32,7 @@ export class AttachmentsService {
     activityDataId: string,
     file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
   ) {
+    if (!file) throw new BadRequestException('Choose a file to upload.');
     if (file.size > MAX_FILE_SIZE_BYTES) throw new BadRequestException('File exceeds the 15MB limit.');
     if (!ALLOWED_MIME_TYPES.includes(file.mimetype)) {
       throw new BadRequestException(`Unsupported file type: ${file.mimetype}`);
@@ -39,6 +42,10 @@ export class AttachmentsService {
       where: { id: activityDataId, organizationId: user.organizationId },
     });
     if (!activity) throw new NotFoundException('Activity data row not found.');
+    const period = await this.prisma.reportingPeriod.findFirst({ where: { id: activity.reportingPeriodId } });
+    if (period && period.status !== 'draft') {
+      throw new BadRequestException(`The ${period.year} period is ${period.status}; evidence can no longer be added.`);
+    }
     if (user.restrictedFacilityId && activity.facilityId !== user.restrictedFacilityId) {
       throw new BadRequestException('You do not have access to this facility.');
     }
@@ -67,6 +74,54 @@ export class AttachmentsService {
         uploadedBy: user.id,
       },
     });
+  }
+
+  private async findAttachment(user: AuthenticatedUser, activityDataId: string, id: string) {
+    const attachment = await this.prisma.attachment.findFirst({
+      where: { id, activityDataId, activityData: { organizationId: user.organizationId } },
+      include: { activityData: true },
+    });
+    if (!attachment) throw new NotFoundException('Evidence file not found.');
+    if (user.restrictedFacilityId && attachment.activityData.facilityId !== user.restrictedFacilityId) {
+      throw new BadRequestException('You do not have access to this facility.');
+    }
+    return attachment;
+  }
+
+  /** Streams an evidence file through the API, so it works with private buckets too. */
+  async download(user: AuthenticatedUser, activityDataId: string, id: string) {
+    const attachment = await this.findAttachment(user, activityDataId, id);
+    const key = attachmentKey(attachment.fileUrl, process.env.S3_PUBLIC_URL_BASE, process.env.S3_BUCKET);
+    try {
+      const object = await this.s3.send(new GetObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key }));
+      return {
+        stream: object.Body as Readable,
+        fileName: attachment.fileName,
+        fileType: attachment.fileType ?? object.ContentType ?? 'application/octet-stream',
+      };
+    } catch {
+      throw new NotFoundException('The evidence file could not be found in storage.');
+    }
+  }
+
+  /** Removes an evidence file while its reporting period is still a draft. */
+  async remove(user: AuthenticatedUser, activityDataId: string, id: string, req?: { auditContext?: unknown }) {
+    const attachment = await this.findAttachment(user, activityDataId, id);
+    const period = await this.prisma.reportingPeriod.findFirst({ where: { id: attachment.activityData.reportingPeriodId } });
+    if (period && period.status !== 'draft') {
+      throw new BadRequestException(`The ${period.year} period is ${period.status}; its evidence can no longer be removed.`);
+    }
+    await this.prisma.attachment.delete({ where: { id } });
+    try {
+      const key = attachmentKey(attachment.fileUrl, process.env.S3_PUBLIC_URL_BASE, process.env.S3_BUCKET);
+      await this.s3.send(new DeleteObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key }));
+    } catch (err) {
+      // The database row is gone; a leftover object in storage is harmless. Log and continue.
+      console.error('Could not delete evidence object from storage:', err);
+    }
+    const { activityData, ...removed } = attachment;
+    if (req) req.auditContext = { entityId: id, oldValue: removed };
+    return { deleted: true };
   }
 
   list(user: AuthenticatedUser, activityDataId: string) {

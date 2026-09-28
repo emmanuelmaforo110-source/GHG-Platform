@@ -70,3 +70,10 @@ export class Scope3ScreenDto {
   @MinLength(10, { message: 'Explain the decision in at least a short sentence (10 characters or more).' })
   relevanceAssessment: string;
 }
+
+export class ReturnToDraftDto {
+  // What needs correcting, shown to the person who submitted the period
+  @IsString()
+  @MinLength(5)
+  reason: string;
+}

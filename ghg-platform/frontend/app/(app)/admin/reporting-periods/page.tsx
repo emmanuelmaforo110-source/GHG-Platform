@@ -2,6 +2,7 @@
 
 import { useEffect, useState, FormEvent } from 'react';
 import { api, ApiError } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { BOUNDARY_LABELS, BoundaryApproach, GwpSet, ReportingPeriod } from '@/lib/types';
 
 const STATUS_STYLES: Record<string, string> = {
@@ -11,7 +12,11 @@ const STATUS_STYLES: Record<string, string> = {
   locked: 'bg-gray-800 text-white',
 };
 
+const day = (d?: string | null) => (d ? d.slice(0, 10) : '');
+
 export default function ReportingPeriodsPage() {
+  const { user, hasRole } = useAuth();
+  const isAdmin = hasRole('admin');
   const [periods, setPeriods] = useState<ReportingPeriod[]>([]);
   const [year, setYear] = useState(new Date().getFullYear());
   const [staffFte, setStaffFte] = useState<number | ''>('');
@@ -60,6 +65,7 @@ export default function ReportingPeriodsPage() {
 
   async function submit(id: string) {
     setBusyId(id);
+    setError(null);
     try {
       await api.patch(`/reporting-periods/${id}/submit`);
       await load();
@@ -70,8 +76,29 @@ export default function ReportingPeriodsPage() {
     }
   }
 
+  async function sendBack(p: ReportingPeriod) {
+    const reason = window.prompt(`What needs correcting in ${p.year}? This note is shown to the person who submitted it.`);
+    if (reason === null) return;
+    if (reason.trim().length < 5) {
+      setError('Please write a short reason (at least 5 characters).');
+      return;
+    }
+    setBusyId(p.id);
+    setError(null);
+    try {
+      await api.patch(`/reporting-periods/${p.id}/return`, { reason });
+      setNotice(`${p.year} was sent back to draft for corrections.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to send the period back.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function approve(id: string) {
     setBusyId(id);
+    setError(null);
     try {
       const res = await api.patch<{ recalculationCheck: { requiresRecalculation: boolean; percentChange: number | null } | null }>(
         `/reporting-periods/${id}/approve`,
@@ -93,12 +120,16 @@ export default function ReportingPeriodsPage() {
     <div className="max-w-3xl space-y-6">
       <div>
         <h1 className="text-lg font-medium">Reporting periods</h1>
-        <p className="text-sm text-gray-500">Draft → submitted → approved workflow, per organization year</p>
+        <p className="text-sm text-gray-500">
+          Draft → submitted → approved, per year. The person who submits a period cannot approve it: a second Admin checks and
+          approves, or sends it back to draft with a note.
+        </p>
       </div>
 
       {error && <div className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">{error}</div>}
       {notice && <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">{notice}</div>}
 
+      {isAdmin && (
       <form onSubmit={handleCreate} className="card flex flex-col items-stretch gap-3 sm:flex-row sm:items-end">
         <div>
           <label>Year</label>
@@ -129,6 +160,7 @@ export default function ReportingPeriodsPage() {
         </div>
         <button type="submit" className="btn-primary">Create period</button>
       </form>
+      )}
 
       <div className="card divide-y divide-gray-100">
         {periods.map((p) => (
@@ -142,7 +174,7 @@ export default function ReportingPeriodsPage() {
               </span>
               <p className="mt-1 text-xs text-gray-500">
                 {p.boundaryApproach ? BOUNDARY_LABELS[p.boundaryApproach] : ''} · GWP{' '}
-                {p.status === 'draft' ? (
+                {p.status === 'draft' && isAdmin ? (
                   <select
                     className="ml-1 inline-block w-auto px-2 py-0.5 text-xs"
                     value={p.gwpSet ?? 'AR6'}
@@ -156,18 +188,44 @@ export default function ReportingPeriodsPage() {
                   p.gwpSet ?? 'AR6'
                 )}
               </p>
+              {p.submittedAt && (
+                <p className="mt-1 text-xs text-gray-500">Submitted by {p.submittedByName ?? 'unknown'} on {day(p.submittedAt)}</p>
+              )}
+              {p.approvedAt && p.status !== 'draft' && p.status !== 'submitted' && (
+                <p className="mt-1 text-xs text-gray-500">Approved by {p.approvedByName ?? 'unknown'} on {day(p.approvedAt)}</p>
+              )}
+              {p.status === 'draft' && p.returnReason && (
+                <p className="mt-1 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                  Sent back by {p.returnedByName ?? 'an Admin'} on {day(p.returnedAt)}: {p.returnReason}
+                </p>
+              )}
             </div>
+            <div className="flex flex-col items-start gap-1 sm:items-end">
             <div className="flex gap-2">
               {p.status === 'draft' && (
                 <button className="btn-secondary" disabled={busyId === p.id} onClick={() => submit(p.id)}>
                   Submit
                 </button>
               )}
-              {p.status === 'submitted' && (
-                <button className="btn-primary" disabled={busyId === p.id} onClick={() => approve(p.id)}>
-                  Approve
-                </button>
+              {p.status === 'submitted' && isAdmin && (
+                <>
+                  <button className="btn-secondary" disabled={busyId === p.id} onClick={() => sendBack(p)}>
+                    Send back
+                  </button>
+                  <button
+                    className="btn-primary"
+                    disabled={busyId === p.id || p.submittedBy === user?.id}
+                    title={p.submittedBy === user?.id ? 'You submitted this period, so another Admin must approve it' : undefined}
+                    onClick={() => approve(p.id)}
+                  >
+                    Approve
+                  </button>
+                </>
               )}
+            </div>
+            {p.status === 'submitted' && isAdmin && p.submittedBy === user?.id && (
+              <p className="text-xs text-gray-500">You submitted this — another Admin must approve it.</p>
+            )}
             </div>
           </div>
         ))}

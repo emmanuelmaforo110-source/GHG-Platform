@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { CalculationEngineService } from '../activity-data/calculation-engine.service';
@@ -13,11 +13,22 @@ export class ReportingPeriodsService {
     private activityData: ActivityDataService,
   ) {}
 
-  list(user: AuthenticatedUser) {
-    return this.prisma.reportingPeriod.findMany({
-      where: { organizationId: user.organizationId },
-      orderBy: { year: 'desc' },
-    });
+  /** Periods with the names of who submitted, approved or returned them (for the approval screen). */
+  async list(user: AuthenticatedUser) {
+    const [periods, users] = await Promise.all([
+      this.prisma.reportingPeriod.findMany({
+        where: { organizationId: user.organizationId },
+        orderBy: { year: 'desc' },
+      }),
+      this.prisma.user.findMany({ where: { organizationId: user.organizationId }, select: { id: true, fullName: true } }),
+    ]);
+    const name = (id?: string | null) => (id ? users.find((u) => u.id === id)?.fullName ?? null : null);
+    return periods.map((p) => ({
+      ...p,
+      submittedByName: name(p.submittedBy),
+      approvedByName: name(p.approvedBy),
+      returnedByName: name(p.returnedBy),
+    }));
   }
 
   async create(user: AuthenticatedUser, dto: CreateReportingPeriodDto) {
@@ -132,16 +143,49 @@ export class ReportingPeriodsService {
     if (!period) throw new NotFoundException('Reporting period not found.');
     if (period.status !== 'draft') throw new BadRequestException('Only a draft period can be submitted.');
 
+    const entries = await this.prisma.activityData.findMany({ where: { reportingPeriodId: id, organizationId: user.organizationId }, select: { id: true } });
+    if (entries.length === 0) throw new BadRequestException('Add at least one entry before submitting the period for approval.');
+
     return this.prisma.reportingPeriod.update({
       where: { id },
       data: { status: 'submitted', submittedBy: user.id, submittedAt: new Date() },
     });
   }
 
+  /**
+   * Sends a submitted period back to draft so errors can be corrected. The reason is kept on the period
+   * (and in the audit log) so the person who submitted it knows what to fix.
+   */
+  async returnToDraft(user: AuthenticatedUser, id: string, reason: string, req?: { auditContext?: unknown }) {
+    const period = await this.prisma.reportingPeriod.findFirst({ where: { id, organizationId: user.organizationId } });
+    if (!period) throw new NotFoundException('Reporting period not found.');
+    if (period.status !== 'submitted') throw new BadRequestException('Only a submitted period can be sent back to draft.');
+    const updated = await this.prisma.reportingPeriod.update({
+      where: { id },
+      data: {
+        status: 'draft',
+        submittedBy: null,
+        submittedAt: null,
+        returnReason: reason.trim(),
+        returnedBy: user.id,
+        returnedAt: new Date(),
+      },
+    });
+    if (req) req.auditContext = { entityId: id, oldValue: period, newValue: updated };
+    return updated;
+  }
+
   async approve(user: AuthenticatedUser, id: string) {
     const period = await this.prisma.reportingPeriod.findFirst({ where: { id, organizationId: user.organizationId } });
     if (!period) throw new NotFoundException('Reporting period not found.');
     if (period.status !== 'submitted') throw new BadRequestException('Only a submitted period can be approved.');
+    // Separation of duties (the "four-eyes" check auditors expect): the person who submitted the
+    // inventory cannot also approve it.
+    if (period.submittedBy && period.submittedBy === user.id) {
+      throw new ForbiddenException(
+        'You submitted this period, so another Admin must approve it. Invite a second Admin on the Users page if needed.',
+      );
+    }
 
     // Section 3.4 — surface a recalculation flag alongside approval rather than blocking it; an Admin
     // may still choose to approve while acknowledging the base-year variance for disclosure purposes.
@@ -151,7 +195,7 @@ export class ReportingPeriodsService {
 
     const updated = await this.prisma.reportingPeriod.update({
       where: { id },
-      data: { status: 'approved', approvedBy: user.id, approvedAt: new Date() },
+      data: { status: 'approved', approvedBy: user.id, approvedAt: new Date(), returnReason: null },
     });
 
     return { ...updated, recalculationCheck: thresholdCheck };

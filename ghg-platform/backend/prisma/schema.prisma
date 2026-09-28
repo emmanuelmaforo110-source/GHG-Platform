@@ -138,6 +138,7 @@ model User {
   auditLogs            AuditLog[]
   submittedPeriods     ReportingPeriod[] @relation("SubmittedBy")
   approvedPeriods      ReportingPeriod[] @relation("ApprovedBy")
+  returnedPeriods      ReportingPeriod[] @relation("ReturnedBy")
   assessedScreens      Scope3RelevanceScreen[]
 
   @@unique([organizationId, email])
@@ -210,11 +211,16 @@ model ReportingPeriod {
   submittedAt                 DateTime?         @map("submitted_at")
   approvedBy                  String?           @map("approved_by") @db.Uuid
   approvedAt                  DateTime?         @map("approved_at")
+  // Set when an approver sends a submitted period back to draft for corrections
+  returnReason                String?           @map("return_reason")
+  returnedBy                  String?           @map("returned_by") @db.Uuid
+  returnedAt                  DateTime?         @map("returned_at")
   createdAt                   DateTime          @default(now()) @map("created_at")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   submitter    User?        @relation("SubmittedBy", fields: [submittedBy], references: [id])
   approver     User?        @relation("ApprovedBy", fields: [approvedBy], references: [id])
+  returner     User?        @relation("ReturnedBy", fields: [returnedBy], references: [id])
 
   activityData     ActivityData[]
   relevanceScreens Scope3RelevanceScreen[]
