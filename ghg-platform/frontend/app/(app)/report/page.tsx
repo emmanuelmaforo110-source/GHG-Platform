@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { BOUNDARY_LABELS, InventoryReport, METHOD_LABELS, ReportingPeriod } from '@/lib/types';
+import { Logo } from '@/components/Logo';
 
 const t = (n: number, dp = 2) => n.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
 const date = (d: string | null) => (d ? new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : '—');
@@ -70,7 +71,10 @@ export default function ReportPage() {
       {report && s && (
         <article className="card space-y-8 text-sm print:border-0 print:p-0">
           <header className="border-b border-gray-200 pb-4">
-            <p className="text-xs uppercase tracking-wide text-gray-500">Greenhouse gas emissions inventory</p>
+            <div className="mb-3 flex items-start justify-between gap-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500">Greenhouse gas emissions inventory</p>
+              <Logo height={28} />
+            </div>
             <h2 className="text-2xl font-medium">{report.organization.name}</h2>
             <p className="text-gray-600">
               Reporting year {report.period.year}

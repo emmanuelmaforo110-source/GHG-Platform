@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api';
+import { Logo } from '@/components/Logo';
 
 function LoginForm() {
   const { login } = useAuth();
@@ -31,13 +32,11 @@ function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-brand-sand px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-brand text-white">
-            <span className="text-lg font-medium">G</span>
-          </div>
-          <h1 className="text-lg font-medium">GHG emission tracking</h1>
+          <Logo variant="stacked" height={120} className="mx-auto mb-4" />
+          <h1 className="text-lg font-medium">Carbon accounting</h1>
           <p className="mt-1 text-sm text-gray-500">Sign in to your organization&apos;s workspace</p>
         </div>
 

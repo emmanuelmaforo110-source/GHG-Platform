@@ -16,6 +16,6 @@ async function bootstrap() {
 
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
   await app.listen(port);
-  console.log(`GHG platform API listening on http://localhost:${port}/api`);
+  console.log(`Go Green API listening on http://localhost:${port}/api`);
 }
 bootstrap();

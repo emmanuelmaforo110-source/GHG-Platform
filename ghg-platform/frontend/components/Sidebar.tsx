@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { RoleGate } from './RoleGate';
+import { Logo } from './Logo';
 
 const navItem = (href: string, label: string, active: boolean) => (
   <Link
@@ -23,12 +24,9 @@ export function Sidebar() {
 
   return (
     <aside className="flex w-full shrink-0 print:hidden flex-col border-b border-gray-200 bg-white md:h-screen md:w-60 md:border-b-0 md:border-r">
-      <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-medium text-white">
-          G
-        </div>
-        <span className="text-sm font-medium">GHG platform</span>
-      </div>
+      <Link href="/dashboard" className="flex items-center border-b border-gray-200 px-4 py-4" aria-label="Go Green home">
+        <Logo height={36} />
+      </Link>
 
       <nav className="flex flex-1 gap-1 overflow-x-auto p-3 md:block md:space-y-1">
         {navItem('/dashboard', 'Dashboard', pathname === '/dashboard')}

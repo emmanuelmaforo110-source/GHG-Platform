@@ -1,7 +1,7 @@
 {
   "name": "ghg-platform-backend",
   "version": "0.1.0",
-  "description": "Multi-tenant Corporate GHG Emission Tracking API — NestJS + Prisma + PostgreSQL",
+  "description": "Go Green — multi-tenant corporate GHG accounting API — NestJS + Prisma + PostgreSQL",
   "private": true,
   "scripts": {
     "build": "nest build",

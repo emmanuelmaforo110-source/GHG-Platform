@@ -3,17 +3,29 @@
 @tailwind utilities;
 
 :root {
-  --ink: #18241e;
-  --muted: #66736b;
-  --canvas: #f4f7f3;
-  --line: #d9e2db;
-  --brand: #1f5c3f;
+  /* Go Green brand ("Earth & Savanna") */
+  --ink: #2a231c;
+  --muted: #6b6154;
+  --canvas: #f8f5ee;
+  --line: #e4dccb;
+  --brand: #2e5e3a;
+  --leaf: #9bb043;
+  --savanna: #d98e32;
+  --sand: #f4efe3;
 }
 
 @layer base {
   body {
     @apply bg-[var(--canvas)] text-[var(--ink)];
-    font-family: 'Trebuchet MS', 'Segoe UI', sans-serif;
+    @apply font-sans;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+  }
+  h1 {
+    @apply font-semibold;
   }
   ::selection {
     @apply bg-brand-light text-brand;
@@ -42,7 +54,7 @@
     @apply border border-gray-300 bg-white text-gray-700 hover:bg-gray-50;
   }
   .card {
-    @apply rounded-lg border border-[var(--line)] bg-white p-5 shadow-[0_8px_24px_rgba(31,92,63,0.05)];
+    @apply rounded-lg border border-[var(--line)] bg-white p-5 shadow-[0_8px_24px_rgba(46,94,58,0.06)];
   }
 }
 
